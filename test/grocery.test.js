@@ -2,18 +2,8 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { buildGroceryList, planExport, keyFromTitle } from "../src/core/grocery.js";
 
-const tacos = { name: "Tacos", ingredients: [
-  { qty: 1, unit: "lb", item: "ground beef" },
-  { qty: 1, unit: "", item: "onion" },
-  { qty: 0.5, unit: "cup", item: "sour cream" },
-  { qty: null, unit: "", item: "salt" },
-] };
-const chili = { name: "Chili", ingredients: [
-  { qty: 8, unit: "oz", item: "ground beef" },
-  { qty: 2, unit: "", item: "Onions" },
-  { qty: 2, unit: "can", item: "kidney beans" },
-  { qty: 4, unit: "tbsp", item: "sour cream" },
-] };
+const tacos = { name: "Tacos", ingredients: ["1 lb ground beef", "1 onion, diced", "1/2 cup sour cream", "salt, to taste"] };
+const chili = { name: "Chili", ingredients: ["8 oz ground beef", "2 Onions", "2 (15 oz) cans kidney beans", "4 tbsp sour cream"] };
 
 test("buildGroceryList merges across recipes and sorts by name", () => {
   const list = buildGroceryList([tacos, chili]);

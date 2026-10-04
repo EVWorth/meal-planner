@@ -1,12 +1,21 @@
-// Recipe shape, normalization and validation.
+// Recipes are stored as schema.org Recipe JSON-LD (recipes/<id>.json), the
+// same shape recipe sites publish and other recipe apps import:
 //
-// Stored recipe (recipes/<id>.json):
 // {
-//   id, name, servings (number|null), tags: [string],
-//   ingredients: [{ qty (number|null), unit, item, note }],
-//   steps: [string], sourceUrl, notes, createdAt, updatedAt
+//   "@context": "https://schema.org", "@type": "Recipe",
+//   "identifier": "chicken-tacos", "name": "Chicken Tacos",
+//   "recipeYield": "4", "keywords": "mexican, chicken",
+//   "recipeIngredient": ["1 1/2 lb chicken thighs, boneless", "salt, to taste"],
+//   "recipeInstructions": [{ "@type": "HowToStep", "text": "Season the chicken." }],
+//   "url": "https://…", "description": "our notes",
+//   "dateCreated": "…", "dateModified": "…"
 // }
+//
+// Ingredients stay plain lines; amounts are parsed when the grocery list is
+// built. In the app a recipe is a "draft": { id, name, servings, tags,
+// ingredients: [line], steps: [text], sourceUrl, notes, createdAt, updatedAt }.
 import { parseIngredientLine, parseNumber } from "./ingredients.js";
+import { findRecipe, fromSchemaOrg } from "./jsonld.js";
 import { canonicalUnit, formatQty } from "./units.js";
 
 export function slugify(name) {
@@ -31,35 +40,7 @@ export function uniqueId(name, existingIds) {
 }
 
 function toText(v) {
-  return v == null ? "" : String(v).trim();
-}
-
-function toQty(v) {
-  if (v == null || v === "") return null;
-  if (typeof v === "number") return Number.isFinite(v) && v > 0 ? v : null;
-  const n = parseNumber(v);
-  return n != null && n > 0 ? n : null;
-}
-
-export function normalizeIngredient(input) {
-  let ing;
-  if (typeof input === "string") {
-    ing = parseIngredientLine(input);
-  } else if (input && typeof input === "object") {
-    ing = {
-      qty: toQty(input.qty ?? input.quantity ?? input.amount),
-      unit: toText(input.unit),
-      item: toText(input.item ?? input.name ?? input.ingredient),
-      note: toText(input.note ?? input.notes ?? input.preparation),
-    };
-    // An object with only a text field ("1 cup flour") — parse it.
-    if (!ing.item && typeof input.text === "string") ing = parseIngredientLine(input.text);
-  } else {
-    return null;
-  }
-  if (!ing.item) return null;
-  const unit = ing.unit ? canonicalUnit(ing.unit) ?? ing.unit.toLowerCase() : "";
-  return { qty: ing.qty ?? null, unit, item: ing.item, note: ing.note ?? "" };
+  return v == null ? "" : String(v).replace(/\s+/g, " ").trim();
 }
 
 function toList(v) {
@@ -69,45 +50,87 @@ function toList(v) {
   return [v];
 }
 
+/** Parsed view of an ingredient line: { qty, unit, item, note }. */
+export function parseIngredient(line) {
+  const ing = parseIngredientLine(line);
+  return { ...ing, unit: ing.unit ? canonicalUnit(ing.unit) ?? ing.unit : "" };
+}
+
+/** Ingredient line from a string or a structured object ({qty, unit, item, note}). */
+function ingredientLine(input) {
+  if (typeof input === "string") return toText(input);
+  if (!input || typeof input !== "object") return "";
+  if (typeof input.text === "string") return toText(input.text);
+  const item = toText(input.item ?? input.name ?? input.ingredient ?? input.food);
+  if (!item) return "";
+  const raw = input.qty ?? input.quantity ?? input.amount;
+  const qty = typeof raw === "number" ? raw : parseNumber(raw);
+  return ingredientText({ qty: qty > 0 ? qty : null, unit: toText(input.unit), item, note: toText(input.note ?? input.notes) });
+}
+
 /**
- * Coerce loosely-shaped input (chatbot JSON, JSON-LD mapping, form edits)
- * into a stored recipe. Throws if there is no name or no ingredients.
- * `existing` keeps id/createdAt when editing.
+ * Editable draft from anything recipe-shaped: a stored file, schema.org
+ * JSON-LD from a page or an AI chat app, or a loose { name, ingredients,
+ * steps } object. Never throws; toSchemaOrg validates.
  */
-export function normalizeRecipe(input, { now = new Date(), existing = null, existingIds = [] } = {}) {
-  if (!input || typeof input !== "object") throw new Error("Recipe must be a JSON object.");
-  const name = toText(input.name ?? input.title);
-  if (!name) throw new Error("Recipe needs a name.");
-  const ingredients = toList(input.ingredients)
-    .map(normalizeIngredient)
-    .filter(Boolean);
-  if (!ingredients.length) throw new Error(`"${name}" has no ingredients.`);
-  const steps = toList(input.steps ?? input.instructions)
-    .map((s) => (typeof s === "object" && s ? toText(s.text) : toText(s)))
-    .map((s) => s.replace(/^\d+[.)]\s*/, ""))
-    .filter(Boolean);
-  const tags = [...new Set(toList(typeof input.tags === "string" ? input.tags.split(",") : input.tags)
-    .map((t) => toText(t).toLowerCase())
-    .filter(Boolean))];
-  const servings = toQty(input.servings ?? input.yield);
-  const stamp = now.toISOString();
+export function toDraft(input) {
+  if (!input || typeof input !== "object") return toDraft({});
+  const node = findRecipe(input);
+  if (node) return fromSchemaOrg(node);
+  const servings = typeof input.servings === "number" ? input.servings : parseNumber(String(input.servings ?? "").match(/[\d./ ]+/)?.[0]);
   return {
-    id: existing?.id ?? input.id ?? uniqueId(name, existingIds),
-    name,
-    servings: servings == null ? null : Math.round(servings),
-    tags,
-    ingredients,
-    steps,
+    id: toText(input.id),
+    name: toText(input.name ?? input.title),
+    servings: servings > 0 ? Math.round(servings) : null,
+    tags: [...new Set(toList(typeof input.tags === "string" ? input.tags.split(",") : input.tags).map((t) => toText(t).toLowerCase()).filter(Boolean))],
+    ingredients: toList(input.ingredients).map(ingredientLine).filter(Boolean),
+    steps: toList(input.steps ?? input.instructions)
+      .map((s) => (s && typeof s === "object" ? toText(s.text) : toText(s)))
+      .map((s) => s.replace(/^\d+[.)]\s*/, ""))
+      .filter(Boolean),
     sourceUrl: toText(input.sourceUrl ?? input.url ?? input.source),
     notes: toText(input.notes),
-    createdAt: existing?.createdAt ?? input.createdAt ?? stamp,
-    updatedAt: stamp,
+    createdAt: toText(input.createdAt),
+    updatedAt: toText(input.updatedAt),
   };
 }
 
 /**
- * Parse recipe JSON pasted from a chatbot. Accepts a bare object, an array
- * of recipes, or text with a ```json fence around it.
+ * The stored schema.org document for a draft. Throws if there is no name
+ * or no ingredients. `existing` (a draft) keeps id and dateCreated when
+ * editing; new recipes get an id not in `existingIds`.
+ */
+export function toSchemaOrg(draft, { now = new Date(), existing = null, existingIds = [] } = {}) {
+  const name = toText(draft.name);
+  if (!name) throw new Error("Recipe needs a name.");
+  const ingredients = draft.ingredients.map(toText).filter(Boolean);
+  if (!ingredients.length) throw new Error(`"${name}" has no ingredients.`);
+  const stamp = now.toISOString();
+  const doc = {
+    "@context": "https://schema.org",
+    "@type": "Recipe",
+    identifier: existing?.id || draft.id || uniqueId(name, existingIds),
+    name,
+  };
+  if (draft.servings) doc.recipeYield = String(draft.servings);
+  if (draft.tags.length) doc.keywords = draft.tags.join(", ");
+  doc.recipeIngredient = ingredients;
+  doc.recipeInstructions = draft.steps.map(toText).filter(Boolean).map((text) => ({ "@type": "HowToStep", text }));
+  if (draft.sourceUrl) doc.url = draft.sourceUrl;
+  if (draft.notes) doc.description = draft.notes;
+  doc.dateCreated = existing?.createdAt || draft.createdAt || stamp;
+  doc.dateModified = stamp;
+  return doc;
+}
+
+/** Stored document for anything recipe-shaped (toDraft + toSchemaOrg). */
+export function normalizeRecipe(input, opts) {
+  return toSchemaOrg(toDraft(input), opts);
+}
+
+/**
+ * Parse recipe JSON pasted from an AI chat app. Accepts a bare object, an
+ * array of recipes, an @graph, or text with a ```json fence around it.
  */
 export function parseRecipeJson(text) {
   const raw = String(text ?? "").trim();
@@ -126,10 +149,14 @@ export function parseRecipeJson(text) {
   }
   if (Array.isArray(data)) return data;
   if (data && Array.isArray(data.recipes)) return data.recipes;
+  if (data && Array.isArray(data["@graph"])) {
+    const recipes = data["@graph"].filter((n) => findRecipe(n));
+    if (recipes.length) return recipes;
+  }
   return [data];
 }
 
-/** One line per ingredient, for display and editing. */
+/** An ingredient line from parsed parts. */
 export function ingredientText(ing) {
   const parts = [];
   if (ing.qty != null) parts.push(formatQty(ing.qty, ing.unit));
@@ -138,4 +165,14 @@ export function ingredientText(ing) {
   let s = parts.join(" ");
   if (ing.note) s += `, ${ing.note}`;
   return s;
+}
+
+/** How the grocery list reads a line: "1 1/2 · lb · chicken thighs". */
+export function describeIngredient(line) {
+  const ing = parseIngredient(line);
+  const parts = [];
+  parts.push(ing.qty != null ? formatQty(ing.qty, ing.unit) : "no amount");
+  if (ing.unit) parts.push(ing.unit);
+  parts.push(ing.item || "?");
+  return parts.join(" · ");
 }

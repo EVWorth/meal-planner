@@ -69,8 +69,7 @@ async function pasteJson(ctx) {
   const failed = [];
   for (const item of items) {
     try {
-      const recipe = normalizeRecipe(item, { existingIds: ctx.recipes.map((r) => r.id) });
-      ctx.saveRecipe(recipe);
+      const recipe = ctx.saveRecipe(normalizeRecipe(item, { existingIds: ctx.recipes.map((r) => r.id) }));
       saved.push(recipe.name);
     } catch (e) {
       failed.push(e.message);

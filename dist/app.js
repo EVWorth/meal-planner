@@ -301,6 +301,11 @@ function parseIngredientLine(line) {
     if (rest) notes.push(rest);
     s = s.slice(0, comma);
   }
+  const trailing = s.match(/\s+((?:to taste|as needed|for serving|for garnish|optional)\.?)\s*$/i);
+  if (trailing) {
+    notes.unshift(trailing[1].replace(/\.$/, ""));
+    s = s.slice(0, trailing.index);
+  }
   result.item = s.replace(/\s+/g, " ").trim();
   result.note = notes.filter(Boolean).join("; ");
   return result;
@@ -322,103 +327,6 @@ function singular(word) {
   if (word in IRREGULAR) return IRREGULAR[word];
   if (word.endsWith("s")) return word.slice(0, -1);
   return word;
-}
-
-// src/core/recipe.js
-function slugify(name) {
-  const s = String(name ?? "").normalize("NFKD").replace(/[̀-ͯ]/g, "").toLowerCase().replace(/&/g, " and ").replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 60).replace(/-+$/g, "");
-  return s || "recipe";
-}
-function uniqueId(name, existingIds) {
-  const taken = new Set(existingIds);
-  const base = slugify(name);
-  if (!taken.has(base)) return base;
-  for (let i = 2; ; i++) if (!taken.has(`${base}-${i}`)) return `${base}-${i}`;
-}
-function toText(v) {
-  return v == null ? "" : String(v).trim();
-}
-function toQty(v) {
-  if (v == null || v === "") return null;
-  if (typeof v === "number") return Number.isFinite(v) && v > 0 ? v : null;
-  const n = parseNumber(v);
-  return n != null && n > 0 ? n : null;
-}
-function normalizeIngredient(input) {
-  let ing;
-  if (typeof input === "string") {
-    ing = parseIngredientLine(input);
-  } else if (input && typeof input === "object") {
-    ing = {
-      qty: toQty(input.qty ?? input.quantity ?? input.amount),
-      unit: toText(input.unit),
-      item: toText(input.item ?? input.name ?? input.ingredient),
-      note: toText(input.note ?? input.notes ?? input.preparation)
-    };
-    if (!ing.item && typeof input.text === "string") ing = parseIngredientLine(input.text);
-  } else {
-    return null;
-  }
-  if (!ing.item) return null;
-  const unit = ing.unit ? canonicalUnit(ing.unit) ?? ing.unit.toLowerCase() : "";
-  return { qty: ing.qty ?? null, unit, item: ing.item, note: ing.note ?? "" };
-}
-function toList(v) {
-  if (v == null) return [];
-  if (Array.isArray(v)) return v;
-  if (typeof v === "string") return v.split(/\n+/);
-  return [v];
-}
-function normalizeRecipe(input, { now = /* @__PURE__ */ new Date(), existing = null, existingIds = [] } = {}) {
-  if (!input || typeof input !== "object") throw new Error("Recipe must be a JSON object.");
-  const name = toText(input.name ?? input.title);
-  if (!name) throw new Error("Recipe needs a name.");
-  const ingredients = toList(input.ingredients).map(normalizeIngredient).filter(Boolean);
-  if (!ingredients.length) throw new Error(`"${name}" has no ingredients.`);
-  const steps = toList(input.steps ?? input.instructions).map((s) => typeof s === "object" && s ? toText(s.text) : toText(s)).map((s) => s.replace(/^\d+[.)]\s*/, "")).filter(Boolean);
-  const tags2 = [...new Set(toList(typeof input.tags === "string" ? input.tags.split(",") : input.tags).map((t) => toText(t).toLowerCase()).filter(Boolean))];
-  const servings2 = toQty(input.servings ?? input.yield);
-  const stamp = now.toISOString();
-  return {
-    id: existing?.id ?? input.id ?? uniqueId(name, existingIds),
-    name,
-    servings: servings2 == null ? null : Math.round(servings2),
-    tags: tags2,
-    ingredients,
-    steps,
-    sourceUrl: toText(input.sourceUrl ?? input.url ?? input.source),
-    notes: toText(input.notes),
-    createdAt: existing?.createdAt ?? input.createdAt ?? stamp,
-    updatedAt: stamp
-  };
-}
-function parseRecipeJson(text) {
-  const raw = String(text ?? "").trim();
-  const fenced = raw.match(/```(?:json)?\s*([\s\S]*?)```/);
-  let body = fenced ? fenced[1] : raw;
-  if (!fenced) {
-    const start = body.search(/[[{]/);
-    const end = Math.max(body.lastIndexOf("}"), body.lastIndexOf("]"));
-    if (start >= 0 && end > start) body = body.slice(start, end + 1);
-  }
-  let data;
-  try {
-    data = JSON.parse(body);
-  } catch (e) {
-    throw new Error("That isn't valid JSON: " + e.message);
-  }
-  if (Array.isArray(data)) return data;
-  if (data && Array.isArray(data.recipes)) return data.recipes;
-  return [data];
-}
-function ingredientText(ing) {
-  const parts = [];
-  if (ing.qty != null) parts.push(formatQty(ing.qty, ing.unit));
-  if (ing.unit) parts.push(ing.unit);
-  parts.push(ing.item);
-  let s = parts.join(" ");
-  if (ing.note) s += `, ${ing.note}`;
-  return s;
 }
 
 // src/core/jsonld.js
@@ -505,27 +413,162 @@ function jsonLdBlocks(html) {
   }
   return out;
 }
-function recipeFromHtml(html, url = "") {
-  const node = findRecipe(jsonLdBlocks(html));
-  if (!node) return null;
-  const ingredients = (Array.isArray(node.recipeIngredient) ? node.recipeIngredient : node.ingredients ?? []).map(clean).filter(Boolean);
-  if (!ingredients.length) return null;
+function text(v) {
+  if (Array.isArray(v)) v = v[0];
+  if (v && typeof v === "object") v = v["@id"] ?? v.url ?? v.name ?? "";
+  return typeof v === "string" ? clean(v) : v == null ? "" : String(v);
+}
+function ingredientLines(node) {
+  const raw = node.recipeIngredient ?? node.ingredients ?? [];
+  const list = Array.isArray(raw) ? raw : String(raw).split(/\n+/);
+  return list.map((i) => typeof i === "string" ? clean(i) : text(i)).filter(Boolean);
+}
+function fromSchemaOrg(node) {
   return {
+    id: text(node.identifier),
     name: clean(node.name),
     servings: servings(node.recipeYield),
     tags: tags(node),
-    ingredients,
+    ingredients: ingredientLines(node),
     steps: instructions(node.recipeInstructions),
-    sourceUrl: url || (typeof node.url === "string" ? node.url : ""),
-    notes: ""
+    sourceUrl: text(node.url),
+    notes: text(node.description),
+    createdAt: text(node.dateCreated),
+    updatedAt: text(node.dateModified)
   };
+}
+function recipeFromHtml(html, url = "") {
+  const node = findRecipe(jsonLdBlocks(html));
+  if (!node) return null;
+  const draft = fromSchemaOrg(node);
+  if (!draft.ingredients.length) return null;
+  return { ...draft, id: "", notes: "", createdAt: "", updatedAt: "", sourceUrl: url || draft.sourceUrl };
+}
+
+// src/core/recipe.js
+function slugify(name) {
+  const s = String(name ?? "").normalize("NFKD").replace(/[̀-ͯ]/g, "").toLowerCase().replace(/&/g, " and ").replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 60).replace(/-+$/g, "");
+  return s || "recipe";
+}
+function uniqueId(name, existingIds) {
+  const taken = new Set(existingIds);
+  const base = slugify(name);
+  if (!taken.has(base)) return base;
+  for (let i = 2; ; i++) if (!taken.has(`${base}-${i}`)) return `${base}-${i}`;
+}
+function toText(v) {
+  return v == null ? "" : String(v).replace(/\s+/g, " ").trim();
+}
+function toList(v) {
+  if (v == null) return [];
+  if (Array.isArray(v)) return v;
+  if (typeof v === "string") return v.split(/\n+/);
+  return [v];
+}
+function parseIngredient(line) {
+  const ing = parseIngredientLine(line);
+  return { ...ing, unit: ing.unit ? canonicalUnit(ing.unit) ?? ing.unit : "" };
+}
+function ingredientLine(input) {
+  if (typeof input === "string") return toText(input);
+  if (!input || typeof input !== "object") return "";
+  if (typeof input.text === "string") return toText(input.text);
+  const item = toText(input.item ?? input.name ?? input.ingredient ?? input.food);
+  if (!item) return "";
+  const raw = input.qty ?? input.quantity ?? input.amount;
+  const qty = typeof raw === "number" ? raw : parseNumber(raw);
+  return ingredientText({ qty: qty > 0 ? qty : null, unit: toText(input.unit), item, note: toText(input.note ?? input.notes) });
+}
+function toDraft(input) {
+  if (!input || typeof input !== "object") return toDraft({});
+  const node = findRecipe(input);
+  if (node) return fromSchemaOrg(node);
+  const servings2 = typeof input.servings === "number" ? input.servings : parseNumber(String(input.servings ?? "").match(/[\d./ ]+/)?.[0]);
+  return {
+    id: toText(input.id),
+    name: toText(input.name ?? input.title),
+    servings: servings2 > 0 ? Math.round(servings2) : null,
+    tags: [...new Set(toList(typeof input.tags === "string" ? input.tags.split(",") : input.tags).map((t) => toText(t).toLowerCase()).filter(Boolean))],
+    ingredients: toList(input.ingredients).map(ingredientLine).filter(Boolean),
+    steps: toList(input.steps ?? input.instructions).map((s) => s && typeof s === "object" ? toText(s.text) : toText(s)).map((s) => s.replace(/^\d+[.)]\s*/, "")).filter(Boolean),
+    sourceUrl: toText(input.sourceUrl ?? input.url ?? input.source),
+    notes: toText(input.notes),
+    createdAt: toText(input.createdAt),
+    updatedAt: toText(input.updatedAt)
+  };
+}
+function toSchemaOrg(draft, { now = /* @__PURE__ */ new Date(), existing = null, existingIds = [] } = {}) {
+  const name = toText(draft.name);
+  if (!name) throw new Error("Recipe needs a name.");
+  const ingredients = draft.ingredients.map(toText).filter(Boolean);
+  if (!ingredients.length) throw new Error(`"${name}" has no ingredients.`);
+  const stamp = now.toISOString();
+  const doc = {
+    "@context": "https://schema.org",
+    "@type": "Recipe",
+    identifier: existing?.id || draft.id || uniqueId(name, existingIds),
+    name
+  };
+  if (draft.servings) doc.recipeYield = String(draft.servings);
+  if (draft.tags.length) doc.keywords = draft.tags.join(", ");
+  doc.recipeIngredient = ingredients;
+  doc.recipeInstructions = draft.steps.map(toText).filter(Boolean).map((text2) => ({ "@type": "HowToStep", text: text2 }));
+  if (draft.sourceUrl) doc.url = draft.sourceUrl;
+  if (draft.notes) doc.description = draft.notes;
+  doc.dateCreated = existing?.createdAt || draft.createdAt || stamp;
+  doc.dateModified = stamp;
+  return doc;
+}
+function normalizeRecipe(input, opts) {
+  return toSchemaOrg(toDraft(input), opts);
+}
+function parseRecipeJson(text2) {
+  const raw = String(text2 ?? "").trim();
+  const fenced = raw.match(/```(?:json)?\s*([\s\S]*?)```/);
+  let body = fenced ? fenced[1] : raw;
+  if (!fenced) {
+    const start = body.search(/[[{]/);
+    const end = Math.max(body.lastIndexOf("}"), body.lastIndexOf("]"));
+    if (start >= 0 && end > start) body = body.slice(start, end + 1);
+  }
+  let data;
+  try {
+    data = JSON.parse(body);
+  } catch (e) {
+    throw new Error("That isn't valid JSON: " + e.message);
+  }
+  if (Array.isArray(data)) return data;
+  if (data && Array.isArray(data.recipes)) return data.recipes;
+  if (data && Array.isArray(data["@graph"])) {
+    const recipes = data["@graph"].filter((n) => findRecipe(n));
+    if (recipes.length) return recipes;
+  }
+  return [data];
+}
+function ingredientText(ing) {
+  const parts = [];
+  if (ing.qty != null) parts.push(formatQty(ing.qty, ing.unit));
+  if (ing.unit) parts.push(ing.unit);
+  parts.push(ing.item);
+  let s = parts.join(" ");
+  if (ing.note) s += `, ${ing.note}`;
+  return s;
+}
+function describeIngredient(line) {
+  const ing = parseIngredient(line);
+  const parts = [];
+  parts.push(ing.qty != null ? formatQty(ing.qty, ing.unit) : "no amount");
+  if (ing.unit) parts.push(ing.unit);
+  parts.push(ing.item || "?");
+  return parts.join(" \xB7 ");
 }
 
 // src/core/grocery.js
 function buildGroceryList(recipes) {
   const byKey = /* @__PURE__ */ new Map();
   for (const recipe of recipes) {
-    for (const ing of recipe.ingredients ?? []) {
+    for (const line of recipe.ingredients ?? []) {
+      const ing = parseIngredient(line);
       const key = itemKey(ing.item);
       if (!key) continue;
       let entry = byKey.get(key);
@@ -660,22 +703,27 @@ function isPastWeek(plan, today = /* @__PURE__ */ new Date()) {
 
 // src/core/chatbot.js
 function chatbotPrompt() {
-  return `Convert the recipe below into JSON for my meal planner. Reply with only the JSON, in a code block, shaped like this:
+  return `Convert the recipe below into schema.org Recipe JSON-LD for my meal planner. Reply with only the JSON, in a code block, shaped like this:
 
 {
+  "@context": "https://schema.org",
+  "@type": "Recipe",
   "name": "Chicken Tacos",
-  "servings": 4,
-  "tags": ["mexican", "chicken"],
-  "ingredients": [
-    { "qty": 1.5, "unit": "lb", "item": "chicken thighs", "note": "boneless" },
-    { "qty": null, "unit": "", "item": "salt", "note": "to taste" }
+  "recipeYield": "4",
+  "keywords": "mexican, chicken",
+  "recipeIngredient": [
+    "1 1/2 lb chicken thighs, boneless",
+    "8 small corn tortillas",
+    "salt, to taste"
   ],
-  "steps": ["Season the chicken.", "Grill 6 minutes per side."],
-  "sourceUrl": "",
-  "notes": ""
+  "recipeInstructions": [
+    { "@type": "HowToStep", "text": "Season the chicken." },
+    { "@type": "HowToStep", "text": "Grill 6 minutes per side." }
+  ],
+  "url": ""
 }
 
-Rules: qty is a number or null. unit is tsp, tbsp, cup, fl oz, ml, l, g, kg, oz, lb, a count word (clove, can, bunch), or "". item is what you buy, without preparation; put preparation in note.
+Rules: one ingredient per line, starting with the amount and unit when there is one (tsp, tbsp, cup, fl oz, ml, l, g, kg, oz, lb, or a count word like clove, can, bunch), then what you buy; put preparation after a comma. recipeYield is the number of servings. url is the recipe's web link if there is one.
 
 Recipe:
 `;
@@ -725,10 +773,10 @@ var Store = class _Store {
     const fm = this.fm;
     if (!this.exists(path)) return fallback;
     await fm.downloadFileFromiCloud(path);
-    const text = fm.readString(path);
-    if (text == null || text.trim() === "") return fallback;
+    const text2 = fm.readString(path);
+    if (text2 == null || text2.trim() === "") return fallback;
     try {
-      return JSON.parse(text);
+      return JSON.parse(text2);
     } catch (e) {
       throw new Error(`${path.split("/").pop()} is not valid JSON (${e.message}).`);
     }
@@ -756,13 +804,17 @@ var Store = class _Store {
     }
     return [...names];
   }
+  /** All recipes as drafts, sorted by name. Unreadable files are skipped. */
   async listRecipes() {
     const recipes = await Promise.all(
       this.recipeFiles().map(async (name) => {
         const path = this.fm.joinPath(this.recipesDir, name);
         try {
-          const r = await this.readJson(path);
-          return r && r.id && r.name ? r : null;
+          const doc = await this.readJson(path);
+          if (!doc) return null;
+          const draft = toDraft(doc);
+          draft.id = name.replace(/\.json$/, "");
+          return draft.name ? draft : null;
         } catch {
           return null;
         }
@@ -770,11 +822,9 @@ var Store = class _Store {
     );
     return recipes.filter(Boolean).sort((a, b) => a.name.localeCompare(b.name));
   }
-  async getRecipe(id) {
-    return this.readJson(this.recipePath(id));
-  }
-  saveRecipe(recipe) {
-    this.writeJson(this.recipePath(recipe.id), recipe);
+  /** Write a stored schema.org document (see core/recipe.js). */
+  saveRecipe(doc) {
+    this.writeJson(this.recipePath(doc.identifier), doc);
   }
   deleteRecipe(id) {
     const path = this.recipePath(id);
@@ -859,12 +909,15 @@ var Ctx = class {
     this.config = await this.store.updateConfig(patch);
     return this.config;
   }
-  saveRecipe(recipe) {
-    this.store.saveRecipe(recipe);
+  /** Save a stored schema.org document; returns it as a draft. */
+  saveRecipe(doc) {
+    this.store.saveRecipe(doc);
+    const recipe = { ...toDraft(doc), id: doc.identifier };
     const i = this.recipes.findIndex((r) => r.id === recipe.id);
     if (i >= 0) this.recipes[i] = recipe;
     else this.recipes.push(recipe);
     this.recipes.sort((a, b) => a.name.localeCompare(b.name));
+    return recipe;
   }
   async deleteRecipe(id) {
     this.store.deleteRecipe(id);
@@ -884,34 +937,34 @@ async function showError(e) {
 function safe(fn) {
   return () => Promise.resolve().then(fn).catch(showError);
 }
-async function message(title, text = "") {
+async function message(title, text2 = "") {
   const a = new Alert();
   a.title = title;
-  a.message = text;
+  a.message = text2;
   a.addAction("OK");
   await a.presentAlert();
 }
-async function confirm(title, text = "", action = "OK", destructive = false) {
+async function confirm(title, text2 = "", action = "OK", destructive = false) {
   const a = new Alert();
   a.title = title;
-  a.message = text;
+  a.message = text2;
   if (destructive) a.addDestructiveAction(action);
   else a.addAction(action);
   a.addCancelAction("Cancel");
   return await a.presentAlert() === 0;
 }
-async function choose(title, options, { message: text = "", destructive = [] } = {}) {
+async function choose(title, options, { message: text2 = "", destructive = [] } = {}) {
   const a = new Alert();
   a.title = title;
-  if (text) a.message = text;
+  if (text2) a.message = text2;
   options.forEach((o, i) => destructive.includes(i) ? a.addDestructiveAction(o) : a.addAction(o));
   a.addCancelAction("Cancel");
   return a.presentSheet();
 }
-async function prompt(title, fields, { message: text = "", ok = "Save" } = {}) {
+async function prompt(title, fields, { message: text2 = "", ok = "Save" } = {}) {
   const a = new Alert();
   a.title = title;
-  if (text) a.message = text;
+  if (text2) a.message = text2;
   for (const f of fields) a.addTextField(f.placeholder ?? f.label ?? "", f.value ?? "");
   a.addAction(ok);
   a.addCancelAction("Cancel");
@@ -933,10 +986,10 @@ async function liveTable(build) {
   await refresh();
   await table.present();
 }
-function header(table, text) {
+function header(table, text2) {
   const row2 = new UITableRow();
   row2.isHeader = true;
-  row2.addText(text);
+  row2.addText(text2);
   table.addRow(row2);
   return row2;
 }
@@ -970,19 +1023,6 @@ function escapeHtml(s) {
 }
 
 // src/app/editor.js
-function toDraft(input) {
-  return {
-    id: input.id,
-    createdAt: input.createdAt,
-    name: String(input.name ?? input.title ?? ""),
-    servings: input.servings ?? null,
-    tags: Array.isArray(input.tags) ? input.tags : String(input.tags ?? "").split(",").map((t) => t.trim()).filter(Boolean),
-    ingredients: (Array.isArray(input.ingredients) ? input.ingredients : []).map(normalizeIngredient).filter(Boolean),
-    steps: (Array.isArray(input.steps) ? input.steps : []).map(String),
-    sourceUrl: String(input.sourceUrl ?? ""),
-    notes: String(input.notes ?? "")
-  };
-}
 function move(list, i, delta) {
   const j = i + delta;
   if (j < 0 || j >= list.length) return;
@@ -1027,12 +1067,12 @@ async function editRecipe(ctx, input, { existing = null, title = "Edit recipe" }
         await refresh();
       });
       header(t, `Ingredients (${draft.ingredients.length})`);
-      draft.ingredients.forEach((ing, i) => {
-        row(t, ingredientText(ing), "", async () => {
-          const pick = await choose(ingredientText(ing), ["Edit", "Move up", "Delete"], { destructive: [2] });
+      draft.ingredients.forEach((line, i) => {
+        row(t, line, describeIngredient(line), async () => {
+          const pick = await choose(line, ["Edit", "Move up", "Delete"], { destructive: [2] });
           if (pick === 0) {
-            const v = await promptOne("Ingredient", ingredientText(ing), { message: 'Like "1 1/2 cup flour, sifted"' });
-            if (v != null && v.trim()) draft.ingredients[i] = parseIngredientLine(v);
+            const v = await promptOne("Ingredient", line, { message: 'Amount, unit, then the item, like "1 1/2 cup flour, sifted"' });
+            if (v != null && v.trim()) draft.ingredients[i] = v.trim();
           } else if (pick === 1) {
             move(draft.ingredients, i, -1);
           } else if (pick === 2) {
@@ -1043,12 +1083,12 @@ async function editRecipe(ctx, input, { existing = null, title = "Edit recipe" }
       });
       button(t, "\uFF0B Add ingredient", async () => {
         const v = await promptOne("Add ingredient", "", { message: 'Like "2 cloves garlic, minced"', ok: "Add" });
-        if (v && v.trim()) draft.ingredients.push(normalizeIngredient(v));
+        if (v && v.trim()) draft.ingredients.push(v.trim());
         await refresh();
       });
       button(t, "\u{1F4CB} Add ingredients from clipboard (one per line)", async () => {
         const lines = String(Pasteboard.paste() ?? "").split(/\n+/).map((l) => l.trim()).filter(Boolean);
-        draft.ingredients.push(...lines.map(normalizeIngredient).filter(Boolean));
+        draft.ingredients.push(...lines);
         await refresh();
       });
       header(t, `Steps (${draft.steps.length})`);
@@ -1079,22 +1119,15 @@ async function editRecipe(ctx, input, { existing = null, title = "Edit recipe" }
     });
     if (!save) return null;
     try {
-      const recipe = normalizeRecipe(draft, {
-        existing,
-        existingIds: ctx.recipes.map((r) => r.id)
-      });
-      ctx.saveRecipe(recipe);
-      return recipe;
+      const doc = toSchemaOrg(draft, { existing, existingIds: ctx.recipes.map((r) => r.id) });
+      return ctx.saveRecipe(doc);
     } catch (e) {
       await showError(e);
     }
   }
 }
 function recipeHtml(recipe) {
-  const ings = recipe.ingredients.map((i) => {
-    const amount = i.qty != null ? formatAmount({ qty: i.qty, unit: i.unit }) : i.unit;
-    return `<li>${amount ? `<b>${escapeHtml(amount)}</b> ` : ""}${escapeHtml(i.item)}${i.note ? `, <span class="note">${escapeHtml(i.note)}</span>` : ""}</li>`;
-  }).join("");
+  const ings = recipe.ingredients.map((line) => `<li>${escapeHtml(line)}</li>`).join("");
   const steps = recipe.steps.map((s) => `<li>${escapeHtml(s)}</li>`).join("");
   const meta = [recipe.servings ? `Serves ${recipe.servings}` : "", recipe.tags.join(" \xB7 ")].filter(Boolean).join(" \u2014 ");
   const source = recipe.sourceUrl ? `<p class="meta"><a href="${escapeHtml(recipe.sourceUrl)}">Original recipe</a></p>` : "";
@@ -1108,7 +1141,7 @@ h1 { font-size: 26px; line-height: 1.2; margin: 0 0 4px; }
 h2 { font-size: 15px; text-transform: uppercase; letter-spacing: .06em; color: var(--accent); margin: 28px 0 8px; }
 .meta { color: var(--muted); margin: 0; font-size: 15px; }
 ul, ol { padding-left: 22px; } li { margin: 6px 0; }
-ol li { margin: 12px 0; } .note { color: var(--muted); }
+ol li { margin: 12px 0; }
 a { color: var(--accent); }
 </style></head><body>
 <h1>${escapeHtml(recipe.name)}</h1>
@@ -1234,16 +1267,15 @@ async function offerPrompt(ctx, why) {
   return null;
 }
 async function pasteJson(ctx) {
-  const text = String(Pasteboard.paste() ?? "");
-  if (!text.trim()) return message("Clipboard is empty", "Copy the AI's JSON reply first.");
-  const items = parseRecipeJson(text);
+  const text2 = String(Pasteboard.paste() ?? "");
+  if (!text2.trim()) return message("Clipboard is empty", "Copy the AI's JSON reply first.");
+  const items = parseRecipeJson(text2);
   if (items.length === 1) return editRecipe(ctx, items[0], { title: "Check and save" });
   const saved = [];
   const failed = [];
   for (const item of items) {
     try {
-      const recipe = normalizeRecipe(item, { existingIds: ctx.recipes.map((r) => r.id) });
-      ctx.saveRecipe(recipe);
+      const recipe = ctx.saveRecipe(normalizeRecipe(item, { existingIds: ctx.recipes.map((r) => r.id) }));
       saved.push(recipe.name);
     } catch (e) {
       failed.push(e.message);
@@ -1256,12 +1288,12 @@ ${failed.join("\n")}` : ""].join(""));
 }
 async function importShared(ctx, input) {
   const url = input.urls?.[0];
-  const text = input.plainTexts?.[0]?.trim();
+  const text2 = input.plainTexts?.[0]?.trim();
   let saved;
   if (url) saved = await importAndEdit(ctx, url);
-  else if (text && URL_RE.test(text)) saved = await importAndEdit(ctx, text);
-  else if (text && /^\s*(```|\{|\[)/.test(text)) {
-    const items = parseRecipeJson(text);
+  else if (text2 && URL_RE.test(text2)) saved = await importAndEdit(ctx, text2);
+  else if (text2 && /^\s*(```|\{|\[)/.test(text2)) {
+    const items = parseRecipeJson(text2);
     saved = await editRecipe(ctx, items[0], { title: "Check and save" });
   } else {
     return offerPrompt(ctx, "Share a recipe link, or the recipe JSON from an AI chat app. For text or photos, copy the prompt for AI and use any AI chat app.");

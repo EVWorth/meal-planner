@@ -16,7 +16,7 @@ const cases = [
   ["2-3 cloves garlic, minced", { qty: 3, unit: "clove", item: "garlic", note: "minced" }],
   ["½ tsp salt", { qty: 0.5, unit: "tsp", item: "salt", note: "" }],
   ["3 large eggs", { qty: 3, unit: "", item: "large eggs", note: "" }],
-  ["Salt and pepper to taste", { qty: null, unit: "", item: "Salt and pepper to taste", note: "" }],
+  ["Salt and pepper to taste", { qty: null, unit: "", item: "Salt and pepper", note: "to taste" }],
   ["1 cup of milk (optional)", { qty: 1, unit: "cup", item: "milk", note: "optional" }],
   ["8 fl oz chicken stock", { qty: 8, unit: "fl oz", item: "chicken stock", note: "" }],
   ["▢ 1 lb ground beef", { qty: 1, unit: "lb", item: "ground beef", note: "" }],

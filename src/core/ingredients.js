@@ -88,6 +88,12 @@ export function parseIngredientLine(line) {
     if (rest) notes.push(rest);
     s = s.slice(0, comma);
   }
+  // "salt to taste", "parsley for serving"
+  const trailing = s.match(/\s+((?:to taste|as needed|for serving|for garnish|optional)\.?)\s*$/i);
+  if (trailing) {
+    notes.unshift(trailing[1].replace(/\.$/, ""));
+    s = s.slice(0, trailing.index);
+  }
   result.item = s.replace(/\s+/g, " ").trim();
   result.note = notes.filter(Boolean).join("; ");
   return result;

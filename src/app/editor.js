@@ -1,27 +1,6 @@
 // Viewing and editing a single recipe.
-import {
-  formatAmount,
-  ingredientText,
-  normalizeIngredient,
-  normalizeRecipe,
-  parseIngredientLine,
-} from "../core/index.js";
+import { describeIngredient, toDraft, toSchemaOrg } from "../core/index.js";
 import { button, choose, escapeHtml, header, liveTable, promptOne, row, showError } from "./ui.js";
-
-/** Loosely-shaped recipe input -> editable draft. Never throws. */
-export function toDraft(input) {
-  return {
-    id: input.id,
-    createdAt: input.createdAt,
-    name: String(input.name ?? input.title ?? ""),
-    servings: input.servings ?? null,
-    tags: Array.isArray(input.tags) ? input.tags : String(input.tags ?? "").split(",").map((t) => t.trim()).filter(Boolean),
-    ingredients: (Array.isArray(input.ingredients) ? input.ingredients : []).map(normalizeIngredient).filter(Boolean),
-    steps: (Array.isArray(input.steps) ? input.steps : []).map(String),
-    sourceUrl: String(input.sourceUrl ?? ""),
-    notes: String(input.notes ?? ""),
-  };
-}
 
 function move(list, i, delta) {
   const j = i + delta;
@@ -30,7 +9,8 @@ function move(list, i, delta) {
 }
 
 /**
- * Edit a draft. Returns the saved recipe, or null if the user backed out.
+ * Edit anything recipe-shaped. Returns the saved recipe (a draft), or null
+ * if the user backed out.
  * `existing` is the stored recipe when editing (keeps id and createdAt).
  */
 export async function editRecipe(ctx, input, { existing = null, title = "Edit recipe" } = {}) {
@@ -73,12 +53,13 @@ export async function editRecipe(ctx, input, { existing = null, title = "Edit re
       });
 
       header(t, `Ingredients (${draft.ingredients.length})`);
-      draft.ingredients.forEach((ing, i) => {
-        row(t, ingredientText(ing), "", async () => {
-          const pick = await choose(ingredientText(ing), ["Edit", "Move up", "Delete"], { destructive: [2] });
+      // The subtitle shows how the grocery list will read the line.
+      draft.ingredients.forEach((line, i) => {
+        row(t, line, describeIngredient(line), async () => {
+          const pick = await choose(line, ["Edit", "Move up", "Delete"], { destructive: [2] });
           if (pick === 0) {
-            const v = await promptOne("Ingredient", ingredientText(ing), { message: 'Like "1 1/2 cup flour, sifted"' });
-            if (v != null && v.trim()) draft.ingredients[i] = parseIngredientLine(v);
+            const v = await promptOne("Ingredient", line, { message: 'Amount, unit, then the item, like "1 1/2 cup flour, sifted"' });
+            if (v != null && v.trim()) draft.ingredients[i] = v.trim();
           } else if (pick === 1) {
             move(draft.ingredients, i, -1);
           } else if (pick === 2) {
@@ -89,12 +70,12 @@ export async function editRecipe(ctx, input, { existing = null, title = "Edit re
       });
       button(t, "＋ Add ingredient", async () => {
         const v = await promptOne("Add ingredient", "", { message: 'Like "2 cloves garlic, minced"', ok: "Add" });
-        if (v && v.trim()) draft.ingredients.push(normalizeIngredient(v));
+        if (v && v.trim()) draft.ingredients.push(v.trim());
         await refresh();
       });
       button(t, "📋 Add ingredients from clipboard (one per line)", async () => {
         const lines = String(Pasteboard.paste() ?? "").split(/\n+/).map((l) => l.trim()).filter(Boolean);
-        draft.ingredients.push(...lines.map(normalizeIngredient).filter(Boolean));
+        draft.ingredients.push(...lines);
         await refresh();
       });
 
@@ -126,12 +107,8 @@ export async function editRecipe(ctx, input, { existing = null, title = "Edit re
     });
     if (!save) return null;
     try {
-      const recipe = normalizeRecipe(draft, {
-        existing,
-        existingIds: ctx.recipes.map((r) => r.id),
-      });
-      ctx.saveRecipe(recipe);
-      return recipe;
+      const doc = toSchemaOrg(draft, { existing, existingIds: ctx.recipes.map((r) => r.id) });
+      return ctx.saveRecipe(doc);
     } catch (e) {
       await showError(e); // back into the editor with the draft intact
     }
@@ -139,12 +116,7 @@ export async function editRecipe(ctx, input, { existing = null, title = "Edit re
 }
 
 export function recipeHtml(recipe) {
-  const ings = recipe.ingredients
-    .map((i) => {
-      const amount = i.qty != null ? formatAmount({ qty: i.qty, unit: i.unit }) : i.unit;
-      return `<li>${amount ? `<b>${escapeHtml(amount)}</b> ` : ""}${escapeHtml(i.item)}${i.note ? `, <span class="note">${escapeHtml(i.note)}</span>` : ""}</li>`;
-    })
-    .join("");
+  const ings = recipe.ingredients.map((line) => `<li>${escapeHtml(line)}</li>`).join("");
   const steps = recipe.steps.map((s) => `<li>${escapeHtml(s)}</li>`).join("");
   const meta = [recipe.servings ? `Serves ${recipe.servings}` : "", recipe.tags.join(" · ")].filter(Boolean).join(" — ");
   const source = recipe.sourceUrl ? `<p class="meta"><a href="${escapeHtml(recipe.sourceUrl)}">Original recipe</a></p>` : "";
@@ -158,7 +130,7 @@ h1 { font-size: 26px; line-height: 1.2; margin: 0 0 4px; }
 h2 { font-size: 15px; text-transform: uppercase; letter-spacing: .06em; color: var(--accent); margin: 28px 0 8px; }
 .meta { color: var(--muted); margin: 0; font-size: 15px; }
 ul, ol { padding-left: 22px; } li { margin: 6px 0; }
-ol li { margin: 12px 0; } .note { color: var(--muted); }
+ol li { margin: 12px 0; }
 a { color: var(--accent); }
 </style></head><body>
 <h1>${escapeHtml(recipe.name)}</h1>

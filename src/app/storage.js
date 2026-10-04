@@ -1,13 +1,13 @@
 // Shared data in the iCloud Drive folder bookmarked as "MealPlanner".
 //
-//   recipes/<id>.json   one file per recipe
+//   recipes/<id>.json   one schema.org Recipe per file
 //   plan.json           current week
 //   config.json         shared settings
 //
 // iCloud can offload files, so every read downloads first. Writes are
 // last-write-wins; plan changes re-read plan.json right before writing to
 // keep the window for clobbering the other phone's change small.
-import { emptyPlan } from "../core/index.js";
+import { emptyPlan, toDraft } from "../core/index.js";
 
 export const BOOKMARK = "MealPlanner";
 
@@ -98,13 +98,18 @@ export class Store {
     return [...names];
   }
 
+  /** All recipes as drafts, sorted by name. Unreadable files are skipped. */
   async listRecipes() {
     const recipes = await Promise.all(
       this.recipeFiles().map(async (name) => {
         const path = this.fm.joinPath(this.recipesDir, name);
         try {
-          const r = await this.readJson(path);
-          return r && r.id && r.name ? r : null;
+          const doc = await this.readJson(path);
+          if (!doc) return null;
+          const draft = toDraft(doc);
+          // The file name is the id, whatever the file says.
+          draft.id = name.replace(/\.json$/, "");
+          return draft.name ? draft : null;
         } catch {
           return null; // a half-synced or hand-broken file shouldn't take the app down
         }
@@ -113,12 +118,9 @@ export class Store {
     return recipes.filter(Boolean).sort((a, b) => a.name.localeCompare(b.name));
   }
 
-  async getRecipe(id) {
-    return this.readJson(this.recipePath(id));
-  }
-
-  saveRecipe(recipe) {
-    this.writeJson(this.recipePath(recipe.id), recipe);
+  /** Write a stored schema.org document (see core/recipe.js). */
+  saveRecipe(doc) {
+    this.writeJson(this.recipePath(doc.identifier), doc);
   }
 
   deleteRecipe(id) {

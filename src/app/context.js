@@ -1,5 +1,5 @@
 // Loaded state shared by the screens.
-import { prunePlan } from "../core/index.js";
+import { prunePlan, toDraft } from "../core/index.js";
 import { DeviceSettings, Store } from "./storage.js";
 
 export class Ctx {
@@ -38,12 +38,15 @@ export class Ctx {
     return this.config;
   }
 
-  saveRecipe(recipe) {
-    this.store.saveRecipe(recipe);
+  /** Save a stored schema.org document; returns it as a draft. */
+  saveRecipe(doc) {
+    this.store.saveRecipe(doc);
+    const recipe = { ...toDraft(doc), id: doc.identifier };
     const i = this.recipes.findIndex((r) => r.id === recipe.id);
     if (i >= 0) this.recipes[i] = recipe;
     else this.recipes.push(recipe);
     this.recipes.sort((a, b) => a.name.localeCompare(b.name));
+    return recipe;
   }
 
   async deleteRecipe(id) {

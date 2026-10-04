@@ -1,4 +1,5 @@
-// Extract a schema.org Recipe from a web page's JSON-LD.
+// schema.org Recipe (JSON-LD): finding one in a page or pasted JSON, and
+// reading it into the app's editable draft shape.
 
 const ENTITIES = { amp: "&", lt: "<", gt: ">", quot: '"', apos: "'", nbsp: " ", ndash: "–", mdash: "—", frac12: "½", frac14: "¼", frac34: "¾", deg: "°", hellip: "…", rsquo: "’", lsquo: "‘", rdquo: "”", ldquo: "“" };
 
@@ -23,7 +24,8 @@ function hasType(node, type) {
   return Array.isArray(t) ? t.includes(type) : t === type;
 }
 
-function findRecipe(node, depth = 0) {
+/** The first Recipe node in parsed JSON-LD (handles @graph, arrays, nesting). */
+export function findRecipe(node, depth = 0) {
   if (!node || typeof node !== "object" || depth > 8) return null;
   if (Array.isArray(node)) {
     for (const n of node) {
@@ -97,24 +99,43 @@ export function jsonLdBlocks(html) {
   return out;
 }
 
+function text(v) {
+  if (Array.isArray(v)) v = v[0];
+  if (v && typeof v === "object") v = v["@id"] ?? v.url ?? v.name ?? "";
+  return typeof v === "string" ? clean(v) : v == null ? "" : String(v);
+}
+
+function ingredientLines(node) {
+  const raw = node.recipeIngredient ?? node.ingredients ?? [];
+  const list = Array.isArray(raw) ? raw : String(raw).split(/\n+/);
+  return list.map((i) => (typeof i === "string" ? clean(i) : text(i))).filter(Boolean);
+}
+
 /**
- * Recipe input (for normalizeRecipe) from a page's JSON-LD, or null if the
- * page has no usable Recipe.
+ * Draft (see recipe.js) from a schema.org Recipe node. Works for recipe
+ * pages and for the app's own stored files, which are schema.org too.
  */
-export function recipeFromHtml(html, url = "") {
-  const node = findRecipe(jsonLdBlocks(html));
-  if (!node) return null;
-  const ingredients = (Array.isArray(node.recipeIngredient) ? node.recipeIngredient : node.ingredients ?? [])
-    .map(clean)
-    .filter(Boolean);
-  if (!ingredients.length) return null;
+export function fromSchemaOrg(node) {
   return {
+    id: text(node.identifier),
     name: clean(node.name),
     servings: servings(node.recipeYield),
     tags: tags(node),
-    ingredients,
+    ingredients: ingredientLines(node),
     steps: instructions(node.recipeInstructions),
-    sourceUrl: url || (typeof node.url === "string" ? node.url : ""),
-    notes: "",
+    sourceUrl: text(node.url),
+    notes: text(node.description),
+    createdAt: text(node.dateCreated),
+    updatedAt: text(node.dateModified),
   };
+}
+
+/** Draft from a page's JSON-LD, or null if the page has no usable Recipe. */
+export function recipeFromHtml(html, url = "") {
+  const node = findRecipe(jsonLdBlocks(html));
+  if (!node) return null;
+  const draft = fromSchemaOrg(node);
+  if (!draft.ingredients.length) return null;
+  // A web recipe's identifier and description aren't ours.
+  return { ...draft, id: "", notes: "", createdAt: "", updatedAt: "", sourceUrl: url || draft.sourceUrl };
 }

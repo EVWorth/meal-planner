@@ -2,7 +2,7 @@
 
 A [Scriptable](https://scriptable.app) app for iPhone. It keeps a shared recipe library, plans the week's dinners, and sends the merged grocery list to Apple Reminders.
 
-- **Recipes**: import from a web link (share sheet or paste) or from JSON made by any AI chat app, or type one in. Each recipe is one JSON file in a shared iCloud Drive folder.
+- **Recipes**: import from a web link (share sheet or paste) or from JSON made by any AI chat app, or type one in. Each recipe is one schema.org `Recipe` JSON file in a shared iCloud Drive folder.
 - **Week**: 7 nights. Fill them at random from the library, lock the ones you want to keep, mark nights as eating out, and swap single nights. You can set a recipe to *always include* or *never pick*.
 - **Groceries**: ingredients are merged across the week (`1 cup` + `4 tbsp` → `1 1/4 cup`) and listed alphabetically. You review the list before anything is added, one reminder per item. Items already on the list and pantry staples start unticked.
 
@@ -57,24 +57,26 @@ Open the invite. **Meal Planner** then shows up in their iCloud Drive in the Fil
 
 ## Data files
 
-`recipes/<id>.json`:
+Each recipe is a [schema.org `Recipe`](https://schema.org/Recipe) in JSON-LD, the format recipe websites publish. Other recipe apps such as Mealie can import it, so the library isn't tied to this app. `recipes/<identifier>.json`:
 
 ```json
 {
-  "id": "chicken-tacos",
+  "@context": "https://schema.org",
+  "@type": "Recipe",
+  "identifier": "chicken-tacos",
   "name": "Chicken Tacos",
-  "servings": 4,
-  "tags": ["mexican", "chicken"],
-  "ingredients": [
-    { "qty": 1.5, "unit": "lb", "item": "chicken thighs", "note": "boneless" }
-  ],
-  "steps": ["Season the chicken.", "Grill 6 minutes per side."],
-  "sourceUrl": "https://…",
-  "notes": "",
-  "createdAt": "2026-10-04T12:00:00.000Z",
-  "updatedAt": "2026-10-04T12:00:00.000Z"
+  "recipeYield": "4",
+  "keywords": "mexican, chicken",
+  "recipeIngredient": ["1 1/2 lb chicken thighs, boneless", "8 small corn tortillas", "salt, to taste"],
+  "recipeInstructions": [{ "@type": "HowToStep", "text": "Season the chicken." }],
+  "url": "https://…",
+  "description": "Our notes",
+  "dateCreated": "2026-10-04T12:00:00.000Z",
+  "dateModified": "2026-10-04T12:00:00.000Z"
 }
 ```
+
+Ingredients stay as plain lines, the way Paprika and Mela store them. Amounts and units are read from each line when the grocery list is built: start a line with the amount and unit, then the item, with any preparation after a comma. The recipe editor shows how each line is read (for example `1 1/2 · lb · chicken thighs`).
 
 `plan.json` holds the week (`days[]`, each `recipe`/`out`/`empty`, optionally `locked`) and the `include`/`ignore` recipe lists. `config.json` holds the shared settings: `nights`, `startDay`, and `pantry`. Everything is plain JSON, so it stays readable even if Scriptable stops working.
 
@@ -87,7 +89,7 @@ npm run build     # bundle src/ into dist/app.js
 npm run check     # test + build + fail if dist/app.js wasn't rebuilt (what CI runs)
 ```
 
-- `src/core/`: pure JS (parsing, units, merging, plan selection, the prompt for AI). No Scriptable globals.
+- `src/core/`: pure JS (schema.org reading and writing, ingredient-line parsing, units, merging, plan selection, the prompt for AI). No Scriptable globals.
 - `src/app/`: the Scriptable layer: storage, Reminders, network, UITable screens.
 - `loader.js`: the per-phone bootstrap. Changes to it don't reach the phones on their own; each phone has to paste the new version.
 - `test/scriptable-mock.js`: a fake of the Scriptable APIs, used to drive `dist/app.js` end to end in Node. It catches wiring mistakes, not iOS behaviour.

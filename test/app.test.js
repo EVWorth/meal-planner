@@ -8,20 +8,13 @@ import { createScriptable } from "./scriptable-mock.js";
 const fixtureHtml = readFileSync(new URL("./fixtures/allrecipes-like.html", import.meta.url), "utf8");
 
 const tacos = {
-  id: "tacos", name: "Tacos", servings: 4, tags: ["mexican"], steps: ["Cook."], sourceUrl: "", notes: "",
-  ingredients: [
-    { qty: 1, unit: "lb", item: "ground beef", note: "" },
-    { qty: 1, unit: "", item: "onion", note: "" },
-    { qty: null, unit: "", item: "salt", note: "" },
-  ],
+  "@context": "https://schema.org", "@type": "Recipe", identifier: "tacos", name: "Tacos", recipeYield: "4", keywords: "mexican",
+  recipeIngredient: ["1 lb ground beef", "1 onion", "salt, to taste"],
+  recipeInstructions: [{ "@type": "HowToStep", text: "Cook." }],
 };
 const chili = {
-  id: "chili", name: "Chili", servings: 6, tags: [], steps: [], sourceUrl: "", notes: "",
-  ingredients: [
-    { qty: 8, unit: "oz", item: "ground beef", note: "" },
-    { qty: 2, unit: "", item: "onions", note: "" },
-    { qty: 2, unit: "can", item: "kidney beans", note: "" },
-  ],
+  "@context": "https://schema.org", "@type": "Recipe", identifier: "chili", name: "Chili",
+  recipeIngredient: ["8 oz ground beef", "2 onions", "2 cans kidney beans"],
 };
 
 function noErrors(s) {
@@ -47,7 +40,8 @@ test("paste chatbot JSON, review, save", async () => {
   noErrors(s);
   const saved = s.readShared("recipes/lemon-pasta.json");
   assert.equal(saved.name, "Lemon Pasta");
-  assert.deepEqual(saved.ingredients[1], { qty: 1, unit: "", item: "lemon", note: "zested" });
+  assert.equal(saved["@type"], "Recipe");
+  assert.deepEqual(saved.recipeIngredient, ["8 oz spaghetti", "1 lemon, zested"]);
   s.cleanup();
 });
 
@@ -122,8 +116,8 @@ test("share a recipe link: JSON-LD import", async () => {
   await s.loadApp().run({ version: "test", input: s.context.args });
   noErrors(s);
   const saved = s.readShared("recipes/easy-chicken-and-rice.json");
-  assert.equal(saved.sourceUrl, "https://example.com/r");
-  assert.equal(saved.ingredients.length, 5);
+  assert.equal(saved.url, "https://example.com/r");
+  assert.equal(saved.recipeIngredient.length, 5);
   s.cleanup();
 });
 
@@ -140,7 +134,7 @@ test("a link without recipe data offers the prompt for AI", async () => {
   });
   await s.loadApp().run({ version: "test", input: s.context.args });
   noErrors(s);
-  assert.match(s.clipboard, /Convert the recipe below into JSON/);
+  assert.match(s.clipboard, /Convert the recipe below into schema\.org Recipe JSON-LD/);
   assert.ok(!s.log.requests.some((r) => !r.url.startsWith("https://example.com/")), "only the recipe page is fetched");
   s.cleanup();
 });
@@ -155,7 +149,7 @@ test("sharing recipe JSON from an AI chat app opens it for review", async () => 
   s.context.args = { urls: [], plainTexts: ['```json\n{"name":"Toast","ingredients":["2 slices bread"]}\n```'], images: [] };
   await s.loadApp().run({ version: "test", input: s.context.args });
   noErrors(s);
-  assert.equal(s.readShared("recipes/toast.json").ingredients[0].unit, "slice");
+  assert.deepEqual(s.readShared("recipes/toast.json").recipeIngredient, ["2 slices bread"]);
   s.cleanup();
 });
 
@@ -166,7 +160,7 @@ test("sharing plain text offers the prompt for AI", async () => {
   s.context.args = { urls: [], plainTexts: ["Toast: two slices of bread, toasted."], images: [] };
   await s.loadApp().run({ version: "test", input: s.context.args });
   noErrors(s);
-  assert.match(s.clipboard, /Convert the recipe below into JSON/);
+  assert.match(s.clipboard, /Convert the recipe below into schema\.org Recipe JSON-LD/);
   s.cleanup();
 });
 

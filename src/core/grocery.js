@@ -1,17 +1,20 @@
 // Build a merged grocery list from planned recipes, and
 // match it against what's already in Reminders.
 import { itemKey } from "./ingredients.js";
+import { parseIngredient } from "./recipe.js";
 import { formatAmount, sumAmounts } from "./units.js";
 
 /**
- * @param recipes  recipes in the plan (a recipe planned twice appears twice)
+ * @param recipes  drafts in the plan (a recipe planned twice appears twice);
+ *                 each ingredient line is parsed here
  * @returns [{ key, name, amounts:[{qty,unit}], recipes:[name], title, notes }]
  *          sorted by name.
  */
 export function buildGroceryList(recipes) {
   const byKey = new Map();
   for (const recipe of recipes) {
-    for (const ing of recipe.ingredients ?? []) {
+    for (const line of recipe.ingredients ?? []) {
+      const ing = parseIngredient(line);
       const key = itemKey(ing.item);
       if (!key) continue;
       let entry = byKey.get(key);
