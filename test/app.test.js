@@ -110,7 +110,7 @@ test("night menu: eating out and lock survive a refill", async () => {
   s.cleanup();
 });
 
-test("share a recipe link: JSON-LD import without an API key", async () => {
+test("share a recipe link: JSON-LD import", async () => {
   const s = createScriptable({
     fetch: (req) => ({ status: 200, body: req.url === "https://example.com/r" ? fixtureHtml : "" }),
     steps: [
@@ -124,44 +124,46 @@ test("share a recipe link: JSON-LD import without an API key", async () => {
   const saved = s.readShared("recipes/easy-chicken-and-rice.json");
   assert.equal(saved.sourceUrl, "https://example.com/r");
   assert.equal(saved.ingredients.length, 5);
-  assert.ok(!s.log.requests.some((r) => r.url.includes("anthropic")));
   s.cleanup();
 });
 
-test("copied text goes to Claude with the key from the keychain", async () => {
-  const reply = { found: true, name: "Toast", servings: 1, tags: ["breakfast"], notes: "",
-    ingredients: [{ qty: 2, unit: "slice", item: "bread", note: "", aisle: "Bakery" }], steps: ["Toast it."] };
+test("a link without recipe data offers the prompt for AI", async () => {
   const s = createScriptable({
-    pasteboard: "Toast: two slices of bread, toasted.",
-    fetch: (req) => ({ status: 200, body: { type: "message", stop_reason: "end_turn", content: [{ type: "text", text: JSON.stringify(reply) }] } }),
+    fetch: () => ({ status: 200, body: "<html><body>Just a blog post</body></html>" }),
     steps: [
       { table: async ({ tap }) => { await tap("Add a recipe"); } },
-      { alert: "From copied text" },
-      { table: async ({ tap }) => { await tap("Save recipe"); } },
+      { alert: "From a web link" },
+      { alert: (a) => { a.values = ["https://example.com/blog"]; return "Import"; } },
+      { alert: "Copy prompt for AI" },
+      { alert: "OK" },
     ],
   });
-  s.context.Keychain.set("meal-planner.anthropic-api-key", "sk-ant-test");
   await s.loadApp().run({ version: "test", input: s.context.args });
   noErrors(s);
-  const call = s.log.requests.find((r) => r.url === "https://api.anthropic.com/v1/messages");
-  assert.equal(call.method, "POST");
-  assert.equal(call.headers["x-api-key"], "sk-ant-test");
-  const body = JSON.parse(call.body);
-  assert.match(body.messages[0].content[0].text, /two slices of bread/);
+  assert.match(s.clipboard, /Convert the recipe below into JSON/);
+  assert.ok(!s.log.requests.some((r) => !r.url.startsWith("https://example.com/")), "only the recipe page is fetched");
+  s.cleanup();
+});
+
+test("sharing recipe JSON from an AI chat app opens it for review", async () => {
+  const s = createScriptable({
+    steps: [
+      { table: async ({ tap }) => { await tap("Save recipe"); } },
+      { alert: "OK" },
+    ],
+  });
+  s.context.args = { urls: [], plainTexts: ['```json\n{"name":"Toast","ingredients":["2 slices bread"]}\n```'], images: [] };
+  await s.loadApp().run({ version: "test", input: s.context.args });
+  noErrors(s);
   assert.equal(s.readShared("recipes/toast.json").ingredients[0].unit, "slice");
   s.cleanup();
 });
 
-test("without a key, text import offers the chatbot prompt", async () => {
+test("sharing plain text offers the prompt for AI", async () => {
   const s = createScriptable({
-    pasteboard: "some recipe text",
-    steps: [
-      { table: async ({ tap }) => { await tap("Add a recipe"); } },
-      { alert: "From copied text" },
-      { alert: "Copy chatbot prompt" },
-      { alert: "OK" },
-    ],
+    steps: [{ alert: "Copy prompt for AI" }, { alert: "OK" }],
   });
+  s.context.args = { urls: [], plainTexts: ["Toast: two slices of bread, toasted."], images: [] };
   await s.loadApp().run({ version: "test", input: s.context.args });
   noErrors(s);
   assert.match(s.clipboard, /Convert the recipe below into JSON/);

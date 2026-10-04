@@ -1,6 +1,6 @@
 // Loaded state shared by the screens.
 import { prunePlan } from "../core/index.js";
-import { DeviceSettings, Store, apiKey } from "./storage.js";
+import { DeviceSettings, Store } from "./storage.js";
 
 export class Ctx {
   constructor({ store = Store.open(), device = new DeviceSettings(), version = "dev" } = {}) {
@@ -50,9 +50,5 @@ export class Ctx {
     this.store.deleteRecipe(id);
     this.recipes = this.recipes.filter((r) => r.id !== id);
     await this.updatePlan((p) => p);
-  }
-
-  importOptions() {
-    return { key: apiKey.get(), model: this.config.model, aisles: this.config.aisles };
   }
 }

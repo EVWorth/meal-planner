@@ -55,14 +55,6 @@ export function createScriptable({ steps = [], fetch = () => ({ status: 404, bod
     }
   }
 
-  const keychain = new Map();
-  const Keychain = {
-    contains: (k) => keychain.has(k),
-    get: (k) => keychain.get(k),
-    set: (k, v) => keychain.set(k, v),
-    remove: (k) => keychain.delete(k),
-  };
-
   class Request {
     constructor(url) { this.url = url; this.method = "GET"; this.headers = {}; this.body = null; }
     async #send() {
@@ -155,11 +147,8 @@ export function createScriptable({ steps = [], fetch = () => ({ status: 404, bod
   const Color = { blue: () => "blue", gray: () => "gray" };
 
   const context = {
-    FileManager, Keychain, Request, Alert, UITable, UITableRow, WebView, Calendar, Reminder, Pasteboard, Color,
-    Size: class { constructor(w, h) { this.width = w; this.height = h; } },
-    Rect: class { constructor(x, y, w, h) { Object.assign(this, { x, y, w, h }); } },
+    FileManager, Request, Alert, UITable, UITableRow, WebView, Calendar, Reminder, Pasteboard, Color,
     Script: { complete() {} },
-    Photos: { fromLibrary: async () => { throw new Error("cancelled"); }, fromCamera: async () => { throw new Error("cancelled"); } },
     console, setTimeout, Promise, URL,
     args: { urls: [], plainTexts: [], images: [] },
   };

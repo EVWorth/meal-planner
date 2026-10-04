@@ -6,4 +6,4 @@ export * from "./recipe.js";
 export * from "./jsonld.js";
 export * from "./grocery.js";
 export * from "./plan.js";
-export * from "./claude.js";
+export * from "./chatbot.js";

@@ -1,56 +1,30 @@
-// Adding recipes: web link, copied text, photo, chatbot JSON, or by hand.
+// Adding recipes: web link, JSON from an AI chat app, or by hand.
 import { chatbotPrompt, normalizeRecipe, parseRecipeJson } from "../core/index.js";
 import { editRecipe } from "./editor.js";
-import { apiKey } from "./storage.js";
-import { NeedsApiKey, importFromImage, importFromText, importFromUrl } from "./services.js";
+import { NoRecipeData, importFromUrl } from "./services.js";
 import { choose, confirm, message, promptOne } from "./ui.js";
 
 const URL_RE = /^https?:\/\/\S+$/i;
 
+const PROMPT_HELP =
+  "Paste it into any AI chat app, add the recipe's link, text or photo after it, and send. Copy the JSON it replies with, then come back and choose “Paste recipe JSON”. You can also share the reply straight to this script.";
+
 export async function addRecipeMenu(ctx) {
-  const options = [
-    "From a web link",
-    "From copied text",
-    "From a photo",
-    "Take a photo",
-    "Paste recipe JSON",
-    "Copy prompt for ChatGPT / other chatbot",
-    "Type it in",
-  ];
-  const pick = await choose("Add a recipe", options, {
-    message: apiKey.get() ? "" : "No Claude API key on this phone: links with recipe data still work; for the rest, use the chatbot prompt and paste the JSON.",
-  });
+  const options = ["From a web link", "Paste recipe JSON", "Copy prompt for AI", "Type it in"];
+  const pick = await choose("Add a recipe", options);
   switch (pick) {
     case 0: {
       const clip = String(Pasteboard.paste() ?? "").trim();
       const url = await promptOne("Recipe link", URL_RE.test(clip) ? clip : "", { placeholder: "https://", ok: "Import" });
-      if (url && url.trim()) return importAndEdit(ctx, "url", url.trim());
+      if (url && url.trim()) return importAndEdit(ctx, url.trim());
       return null;
     }
-    case 1: {
-      const text = String(Pasteboard.paste() ?? "").trim();
-      if (!text) return message("Clipboard is empty", "Copy the recipe text first, then try again.");
-      return importAndEdit(ctx, "text", text);
-    }
-    case 2:
-    case 3: {
-      let image;
-      try {
-        image = pick === 2 ? await Photos.fromLibrary() : await Photos.fromCamera();
-      } catch {
-        return null; // picker cancelled
-      }
-      return importAndEdit(ctx, "image", image);
-    }
-    case 4:
+    case 1:
       return pasteJson(ctx);
-    case 5:
+    case 2:
       Pasteboard.copy(chatbotPrompt(ctx.config.aisles));
-      return message(
-        "Prompt copied",
-        "Paste it into ChatGPT (or any chatbot), add the recipe link, text or photo after it, and send. Copy the JSON it gives back, then come here and choose “Paste recipe JSON”.",
-      );
-    case 6:
+      return message("Prompt copied", PROMPT_HELP);
+    case 3:
       return editRecipe(ctx, { name: "" }, { title: "New recipe" });
     default:
       return null;
@@ -58,39 +32,36 @@ export async function addRecipeMenu(ctx) {
 }
 
 /**
- * Import from a url/text/image, then open the editor to review and save.
+ * Import a recipe link, then open the editor to review and save.
  * Used by the menu and by the share sheet.
  */
-export async function importAndEdit(ctx, kind, value) {
-  if (kind === "url") {
-    const dup = ctx.recipes.find((r) => r.sourceUrl && r.sourceUrl === value);
-    if (dup && !(await confirm("Already saved", `“${dup.name}” came from this link. Import it again?`, "Import"))) return null;
-  }
+export async function importAndEdit(ctx, url) {
+  const dup = ctx.recipes.find((r) => r.sourceUrl && r.sourceUrl === url);
+  if (dup && !(await confirm("Already saved", `“${dup.name}” came from this link. Import it again?`, "Import"))) return null;
   let input;
   try {
-    const opts = ctx.importOptions();
-    if (kind === "url") input = await importFromUrl(value, opts);
-    else if (kind === "text") input = await importFromText(value, opts);
-    else input = await importFromImage(value, opts);
+    input = await importFromUrl(url);
   } catch (e) {
-    if (e instanceof NeedsApiKey) return offerChatbot(ctx, e.message);
+    if (e instanceof NoRecipeData) return offerPrompt(ctx, e.message);
     throw e;
   }
   return editRecipe(ctx, input, { title: "Check and save" });
 }
 
-async function offerChatbot(ctx, why) {
-  const pick = await choose("Needs Claude", ["Copy chatbot prompt", "Add API key in Settings later"], { message: why });
+async function offerPrompt(ctx, why) {
+  const pick = await choose("Can't read this recipe", ["Copy prompt for AI", "Type it in"], { message: why });
   if (pick === 0) {
     Pasteboard.copy(chatbotPrompt(ctx.config.aisles));
-    await message("Prompt copied", "Paste it into a chatbot with the recipe, then use “Paste recipe JSON”.");
+    await message("Prompt copied", PROMPT_HELP);
+  } else if (pick === 1) {
+    return editRecipe(ctx, { name: "" }, { title: "New recipe" });
   }
   return null;
 }
 
 async function pasteJson(ctx) {
   const text = String(Pasteboard.paste() ?? "");
-  if (!text.trim()) return message("Clipboard is empty", "Copy the chatbot's JSON reply first.");
+  if (!text.trim()) return message("Clipboard is empty", "Copy the AI's JSON reply first.");
   const items = parseRecipeJson(text);
   if (items.length === 1) return editRecipe(ctx, items[0], { title: "Check and save" });
   // Several recipes at once: save the good ones, report the rest.
@@ -109,24 +80,19 @@ async function pasteJson(ctx) {
   return null;
 }
 
-/** Share sheet: a URL, text (which may itself be a URL) or an image. */
+/** Share sheet: a recipe link, or recipe JSON shared from an AI chat app. */
 export async function importShared(ctx, input) {
   const url = input.urls?.[0];
   const text = input.plainTexts?.[0]?.trim();
-  const image = input.images?.[0];
   let saved;
-  if (url) saved = await importAndEdit(ctx, "url", url);
-  else if (text && URL_RE.test(text)) saved = await importAndEdit(ctx, "url", text);
-  else if (text) {
-    // Chatbot JSON shared straight from the chat app
-    if (/^\s*(```|\{|\[)/.test(text)) {
-      const items = parseRecipeJson(text);
-      saved = await editRecipe(ctx, items[0], { title: "Check and save" });
-    } else {
-      saved = await importAndEdit(ctx, "text", text);
-    }
-  } else if (image) saved = await importAndEdit(ctx, "image", image);
-  else return message("Nothing to import", "Share a recipe link, text, or photo to this script.");
+  if (url) saved = await importAndEdit(ctx, url);
+  else if (text && URL_RE.test(text)) saved = await importAndEdit(ctx, text);
+  else if (text && /^\s*(```|\{|\[)/.test(text)) {
+    const items = parseRecipeJson(text);
+    saved = await editRecipe(ctx, items[0], { title: "Check and save" });
+  } else {
+    return offerPrompt(ctx, "Share a recipe link, or the recipe JSON from an AI chat app. For text or photos, copy the prompt for AI and use any AI chat app.");
+  }
   if (saved) await message("Saved", `“${saved.name}” is in your recipes.`);
   return saved;
 }

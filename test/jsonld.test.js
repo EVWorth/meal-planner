@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
-import { recipeFromHtml, htmlToText, decodeEntities, normalizeRecipe } from "../src/core/index.js";
+import { recipeFromHtml, decodeEntities, normalizeRecipe } from "../src/core/index.js";
 
 const html = readFileSync(new URL("./fixtures/allrecipes-like.html", import.meta.url), "utf8");
 
@@ -26,13 +26,6 @@ test("JSON-LD result normalizes into a stored recipe", () => {
 test("recipeFromHtml returns null without a Recipe", () => {
   assert.equal(recipeFromHtml("<html><body>no recipe</body></html>"), null);
   assert.equal(recipeFromHtml('<script type="application/ld+json">{bad json</script>'), null);
-});
-
-test("htmlToText drops scripts and tags", () => {
-  const t = htmlToText(html);
-  assert.ok(t.includes("Hello"));
-  assert.ok(!t.includes("var x"));
-  assert.ok(!t.includes("recipeIngredient"));
 });
 
 test("decodeEntities", () => {

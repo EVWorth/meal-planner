@@ -564,11 +564,6 @@ function recipeFromHtml(html, url = "") {
     notes: ""
   };
 }
-function htmlToText(html) {
-  return decodeEntities(
-    String(html ?? "").replace(/<(script|style|noscript|svg|iframe|head)\b[\s\S]*?<\/\1>/gi, " ").replace(/<!--[\s\S]*?-->/g, " ").replace(/<(br|\/p|\/div|\/li|\/h\d|\/tr)\b[^>]*>/gi, "\n").replace(/<[^>]+>/g, " ")
-  ).replace(/[ \t\f\r]+/g, " ").replace(/\s*\n\s*/g, "\n").replace(/\n{3,}/g, "\n\n").trim();
-}
 
 // src/core/grocery.js
 function buildGroceryList(recipes, { aisles = DEFAULT_AISLES } = {}) {
@@ -720,105 +715,7 @@ function isPastWeek(plan, today = /* @__PURE__ */ new Date()) {
   return parseYmd(plan.days[plan.days.length - 1].date) < parseYmd(ymd(today));
 }
 
-// src/core/claude.js
-var API_URL = "https://api.anthropic.com/v1/messages";
-var DEFAULT_MODEL = "claude-opus-5";
-function recipeSchema(aisles = DEFAULT_AISLES) {
-  const nullableNumber = { anyOf: [{ type: "number" }, { type: "null" }] };
-  return {
-    type: "object",
-    additionalProperties: false,
-    required: ["found", "name", "servings", "tags", "ingredients", "steps", "notes"],
-    properties: {
-      found: { type: "boolean", description: "false if the input contains no recipe" },
-      name: { type: "string" },
-      servings: { anyOf: [{ type: "integer" }, { type: "null" }] },
-      tags: { type: "array", items: { type: "string" } },
-      ingredients: {
-        type: "array",
-        items: {
-          type: "object",
-          additionalProperties: false,
-          required: ["qty", "unit", "item", "note", "aisle"],
-          properties: {
-            qty: nullableNumber,
-            unit: { type: "string" },
-            item: { type: "string" },
-            note: { type: "string" },
-            aisle: { type: "string", enum: aisles }
-          }
-        }
-      },
-      steps: { type: "array", items: { type: "string" } },
-      notes: { type: "string" }
-    }
-  };
-}
-var SYSTEM = `You turn recipes into structured data for a household meal planner and grocery list.
-
-Ingredients:
-- qty is a number (convert fractions: "1 1/2" -> 1.5); use the upper bound of a range; null when no amount is given ("salt to taste").
-- unit is a short standard unit when there is one: tsp, tbsp, cup, fl oz, pint, quart, ml, l, g, kg, oz, lb, or a count word like clove, can, bunch, slice. Use "" for plain counts ("2 onions").
-- item is the thing you buy, without preparation ("onion", not "onion, diced"). Put preparation and size details in note.
-- aisle is where the item is found in a grocery store.
-
-Steps are the method, one string per step, without numbering. Tags are a few short lowercase words (cuisine, main protein, meal type).
-Keep the recipe's own wording and amounts; don't invent ingredients. If the input holds no recipe, set found to false and leave the other fields empty.`;
-function buildImportRequest({ model = DEFAULT_MODEL, aisles = DEFAULT_AISLES, text = "", sourceUrl = "", imageBase64 = "", mediaType = "image/jpeg" } = {}) {
-  const content = [];
-  if (imageBase64) {
-    content.push({ type: "image", source: { type: "base64", media_type: mediaType, data: imageBase64 } });
-  }
-  let prompt2 = imageBase64 ? "Extract the recipe in this photo." : "Extract the recipe from this text.";
-  if (sourceUrl) prompt2 += `
-Source page: ${sourceUrl}`;
-  if (text) prompt2 += `
-
-<recipe_source>
-${text}
-</recipe_source>`;
-  content.push({ type: "text", text: prompt2 });
-  return {
-    model,
-    max_tokens: 16e3,
-    fallbacks: "default",
-    system: SYSTEM,
-    output_config: { format: { type: "json_schema", schema: recipeSchema(aisles) } },
-    messages: [{ role: "user", content }]
-  };
-}
-function requestHeaders(apiKey2) {
-  return {
-    "x-api-key": apiKey2,
-    "anthropic-version": "2023-06-01",
-    "anthropic-beta": "server-side-fallback-2026-07-01",
-    "content-type": "application/json"
-  };
-}
-function parseImportResponse(body, statusCode = 200) {
-  if (!body || typeof body !== "object") throw new Error("Empty response from the Claude API.");
-  if (body.type === "error" || statusCode >= 400) {
-    const msg = body.error?.message ?? `HTTP ${statusCode}`;
-    if (statusCode === 401) throw new Error("The Claude API key was rejected. Check it in Settings.");
-    if (statusCode === 429) throw new Error("Claude API rate limit hit. Try again in a minute.");
-    if (statusCode === 529 || statusCode >= 500) throw new Error("The Claude API is busy. Try again shortly.");
-    throw new Error("Claude API error: " + msg);
-  }
-  if (body.stop_reason === "refusal") throw new Error("Claude declined to read this recipe.");
-  if (body.stop_reason === "max_tokens") throw new Error("The recipe was too long to finish reading.");
-  const texts = (body.content ?? []).filter((b) => b.type === "text");
-  const last = texts[texts.length - 1];
-  if (!last) throw new Error("Claude returned no recipe.");
-  let data;
-  try {
-    data = JSON.parse(last.text);
-  } catch {
-    throw new Error("Claude's reply wasn't valid JSON.");
-  }
-  if (!data.found) throw new Error("No recipe found in that input.");
-  const { found, ...recipe } = data;
-  return recipe;
-}
+// src/core/chatbot.js
 function chatbotPrompt(aisles = DEFAULT_AISLES) {
   return `Convert the recipe below into JSON for my meal planner. Reply with only the JSON, in a code block, shaped like this:
 
@@ -848,8 +745,7 @@ var DEFAULT_CONFIG = {
   startDay: 1,
   // 0 = Sunday, 1 = Monday
   aisles: DEFAULT_AISLES,
-  pantry: ["salt", "black pepper", "water"],
-  model: DEFAULT_MODEL
+  pantry: ["salt", "black pepper", "water"]
 };
 var DEFAULT_DEVICE = {
   remindersList: "Groceries"
@@ -989,14 +885,6 @@ var DeviceSettings = class {
     return next;
   }
 };
-var KEY_NAME = "meal-planner.anthropic-api-key";
-var apiKey = {
-  get: () => Keychain.contains(KEY_NAME) ? Keychain.get(KEY_NAME) : null,
-  set: (key) => Keychain.set(KEY_NAME, key),
-  remove: () => {
-    if (Keychain.contains(KEY_NAME)) Keychain.remove(KEY_NAME);
-  }
-};
 
 // src/app/context.js
 var Ctx = class {
@@ -1040,9 +928,6 @@ var Ctx = class {
     this.store.deleteRecipe(id);
     this.recipes = this.recipes.filter((r) => r.id !== id);
     await this.updatePlan((p) => p);
-  }
-  importOptions() {
-    return { key: apiKey.get(), model: this.config.model, aisles: this.config.aisles };
   }
 };
 
@@ -1308,7 +1193,7 @@ async function viewRecipe(recipe) {
 
 // src/app/services.js
 var SAFARI_UA = "Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.0 Mobile/15E148 Safari/604.1";
-var NeedsApiKey = class extends Error {
+var NoRecipeData = class extends Error {
 };
 async function loadHtml(url) {
   const req = new Request(url);
@@ -1327,57 +1212,19 @@ async function loadRenderedHtml(url) {
   await wv.loadURL(url);
   return wv.getHTML();
 }
-async function importFromUrl(url, { key, model, aisles }) {
-  let html = await loadHtml(url);
-  let recipe = html && recipeFromHtml(html, url);
+async function importFromUrl(url) {
+  const html = await loadHtml(url);
+  const recipe = html && recipeFromHtml(html, url);
   if (recipe) return recipe;
+  let rendered = null;
   try {
-    const rendered = await loadRenderedHtml(url);
-    if (rendered) {
-      html = rendered;
-      recipe = recipeFromHtml(html, url);
-      if (recipe) return recipe;
-    }
+    rendered = await loadRenderedHtml(url);
   } catch {
   }
-  if (!html) throw new Error("Couldn't load that page.");
-  if (!key) throw new NeedsApiKey("That page has no recipe data I can read on my own. Add a Claude API key in Settings, or use the chatbot prompt and paste the JSON.");
-  const input = await callClaude({ key, model, aisles, text: htmlToText(html), sourceUrl: url });
-  return { ...input, sourceUrl: url };
-}
-async function importFromText(text, { key, model, aisles }) {
-  if (!key) throw new NeedsApiKey("Reading pasted text needs a Claude API key. Add one in Settings, or use the chatbot prompt and paste the JSON.");
-  return callClaude({ key, model, aisles, text });
-}
-async function importFromImage(image, { key, model, aisles }) {
-  if (!key) throw new NeedsApiKey("Reading a photo needs a Claude API key. Add one in Settings, or use the chatbot prompt and paste the JSON.");
-  const imageBase64 = Data.fromJPEG(shrink(image, 1568)).toBase64String();
-  return callClaude({ key, model, aisles, imageBase64 });
-}
-function shrink(image, max) {
-  const { width, height } = image.size;
-  const scale = Math.min(1, max / Math.max(width, height));
-  if (scale === 1) return image;
-  const size = new Size(Math.round(width * scale), Math.round(height * scale));
-  const ctx = new DrawContext();
-  ctx.size = size;
-  ctx.respectScreenScale = false;
-  ctx.drawImageInRect(image, new Rect(0, 0, size.width, size.height));
-  return ctx.getImage();
-}
-async function callClaude({ key, model, aisles, text, sourceUrl, imageBase64 }) {
-  const req = new Request(API_URL);
-  req.method = "POST";
-  req.headers = requestHeaders(key);
-  req.body = JSON.stringify(buildImportRequest({ model, aisles, text, sourceUrl, imageBase64 }));
-  req.timeoutInterval = 300;
-  let body;
-  try {
-    body = await req.loadJSON();
-  } catch (e) {
-    throw new Error("Couldn't reach the Claude API: " + e.message);
-  }
-  return parseImportResponse(body, req.response?.statusCode ?? 200);
+  const fromRendered = rendered && recipeFromHtml(rendered, url);
+  if (fromRendered) return fromRendered;
+  if (!html && !rendered) throw new Error("Couldn't load that page.");
+  throw new NoRecipeData("That page doesn't include recipe data the app can read.");
 }
 async function reminderLists() {
   const cals = await Calendar.forReminders();
@@ -1409,83 +1256,53 @@ async function addReminders(listTitle, items) {
 
 // src/app/importer.js
 var URL_RE = /^https?:\/\/\S+$/i;
+var PROMPT_HELP = "Paste it into any AI chat app, add the recipe's link, text or photo after it, and send. Copy the JSON it replies with, then come back and choose \u201CPaste recipe JSON\u201D. You can also share the reply straight to this script.";
 async function addRecipeMenu(ctx) {
-  const options = [
-    "From a web link",
-    "From copied text",
-    "From a photo",
-    "Take a photo",
-    "Paste recipe JSON",
-    "Copy prompt for ChatGPT / other chatbot",
-    "Type it in"
-  ];
-  const pick = await choose("Add a recipe", options, {
-    message: apiKey.get() ? "" : "No Claude API key on this phone: links with recipe data still work; for the rest, use the chatbot prompt and paste the JSON."
-  });
+  const options = ["From a web link", "Paste recipe JSON", "Copy prompt for AI", "Type it in"];
+  const pick = await choose("Add a recipe", options);
   switch (pick) {
     case 0: {
       const clip = String(Pasteboard.paste() ?? "").trim();
       const url = await promptOne("Recipe link", URL_RE.test(clip) ? clip : "", { placeholder: "https://", ok: "Import" });
-      if (url && url.trim()) return importAndEdit(ctx, "url", url.trim());
+      if (url && url.trim()) return importAndEdit(ctx, url.trim());
       return null;
     }
-    case 1: {
-      const text = String(Pasteboard.paste() ?? "").trim();
-      if (!text) return message("Clipboard is empty", "Copy the recipe text first, then try again.");
-      return importAndEdit(ctx, "text", text);
-    }
-    case 2:
-    case 3: {
-      let image;
-      try {
-        image = pick === 2 ? await Photos.fromLibrary() : await Photos.fromCamera();
-      } catch {
-        return null;
-      }
-      return importAndEdit(ctx, "image", image);
-    }
-    case 4:
+    case 1:
       return pasteJson(ctx);
-    case 5:
+    case 2:
       Pasteboard.copy(chatbotPrompt(ctx.config.aisles));
-      return message(
-        "Prompt copied",
-        "Paste it into ChatGPT (or any chatbot), add the recipe link, text or photo after it, and send. Copy the JSON it gives back, then come here and choose \u201CPaste recipe JSON\u201D."
-      );
-    case 6:
+      return message("Prompt copied", PROMPT_HELP);
+    case 3:
       return editRecipe(ctx, { name: "" }, { title: "New recipe" });
     default:
       return null;
   }
 }
-async function importAndEdit(ctx, kind, value) {
-  if (kind === "url") {
-    const dup = ctx.recipes.find((r) => r.sourceUrl && r.sourceUrl === value);
-    if (dup && !await confirm("Already saved", `\u201C${dup.name}\u201D came from this link. Import it again?`, "Import")) return null;
-  }
+async function importAndEdit(ctx, url) {
+  const dup = ctx.recipes.find((r) => r.sourceUrl && r.sourceUrl === url);
+  if (dup && !await confirm("Already saved", `\u201C${dup.name}\u201D came from this link. Import it again?`, "Import")) return null;
   let input;
   try {
-    const opts = ctx.importOptions();
-    if (kind === "url") input = await importFromUrl(value, opts);
-    else if (kind === "text") input = await importFromText(value, opts);
-    else input = await importFromImage(value, opts);
+    input = await importFromUrl(url);
   } catch (e) {
-    if (e instanceof NeedsApiKey) return offerChatbot(ctx, e.message);
+    if (e instanceof NoRecipeData) return offerPrompt(ctx, e.message);
     throw e;
   }
   return editRecipe(ctx, input, { title: "Check and save" });
 }
-async function offerChatbot(ctx, why) {
-  const pick = await choose("Needs Claude", ["Copy chatbot prompt", "Add API key in Settings later"], { message: why });
+async function offerPrompt(ctx, why) {
+  const pick = await choose("Can't read this recipe", ["Copy prompt for AI", "Type it in"], { message: why });
   if (pick === 0) {
     Pasteboard.copy(chatbotPrompt(ctx.config.aisles));
-    await message("Prompt copied", "Paste it into a chatbot with the recipe, then use \u201CPaste recipe JSON\u201D.");
+    await message("Prompt copied", PROMPT_HELP);
+  } else if (pick === 1) {
+    return editRecipe(ctx, { name: "" }, { title: "New recipe" });
   }
   return null;
 }
 async function pasteJson(ctx) {
   const text = String(Pasteboard.paste() ?? "");
-  if (!text.trim()) return message("Clipboard is empty", "Copy the chatbot's JSON reply first.");
+  if (!text.trim()) return message("Clipboard is empty", "Copy the AI's JSON reply first.");
   const items = parseRecipeJson(text);
   if (items.length === 1) return editRecipe(ctx, items[0], { title: "Check and save" });
   const saved = [];
@@ -1507,19 +1324,15 @@ ${failed.join("\n")}` : ""].join(""));
 async function importShared(ctx, input) {
   const url = input.urls?.[0];
   const text = input.plainTexts?.[0]?.trim();
-  const image = input.images?.[0];
   let saved;
-  if (url) saved = await importAndEdit(ctx, "url", url);
-  else if (text && URL_RE.test(text)) saved = await importAndEdit(ctx, "url", text);
-  else if (text) {
-    if (/^\s*(```|\{|\[)/.test(text)) {
-      const items = parseRecipeJson(text);
-      saved = await editRecipe(ctx, items[0], { title: "Check and save" });
-    } else {
-      saved = await importAndEdit(ctx, "text", text);
-    }
-  } else if (image) saved = await importAndEdit(ctx, "image", image);
-  else return message("Nothing to import", "Share a recipe link, text, or photo to this script.");
+  if (url) saved = await importAndEdit(ctx, url);
+  else if (text && URL_RE.test(text)) saved = await importAndEdit(ctx, text);
+  else if (text && /^\s*(```|\{|\[)/.test(text)) {
+    const items = parseRecipeJson(text);
+    saved = await editRecipe(ctx, items[0], { title: "Check and save" });
+  } else {
+    return offerPrompt(ctx, "Share a recipe link, or the recipe JSON from an AI chat app. For text or photos, copy the prompt for AI and use any AI chat app.");
+  }
   if (saved) await message("Saved", `\u201C${saved.name}\u201D is in your recipes.`);
   return saved;
 }
@@ -1723,16 +1536,6 @@ async function settings(ctx) {
       if (i >= 0) ctx.device.set({ remindersList: lists[i] });
       await refresh();
     });
-    row(t, apiKey.get() ? "Claude API key: set" : "Claude API key: not set", "Used to read recipes from text, photos and pages without recipe data", async () => {
-      const options = apiKey.get() ? ["Replace key", "Remove key"] : ["Add key"];
-      const pick = await choose("Claude API key", options, { message: "Stored in this phone's keychain only. Get one at console.anthropic.com.", destructive: apiKey.get() ? [1] : [] });
-      if (options[pick] === "Remove key") apiKey.remove();
-      else if (pick >= 0) {
-        const key = await promptOne("Claude API key", "", { placeholder: "sk-ant-\u2026" });
-        if (key && key.trim()) apiKey.set(key.trim());
-      }
-      await refresh();
-    });
     header(t, "Shared with both phones");
     row(t, DAY_NAMES[cfg.startDay], "Week starts on", async () => {
       const i = await choose("Week starts on", DAY_NAMES);
@@ -1757,14 +1560,9 @@ async function settings(ctx) {
       }
       await refresh();
     });
-    row(t, cfg.model, "Claude model", async () => {
-      const v = await promptOne("Claude model", cfg.model);
-      if (v && v.trim()) await ctx.updateConfig({ model: v.trim() });
-      await refresh();
-    });
-    button(t, "\u{1F4CB} Copy chatbot prompt", async () => {
+    button(t, "\u{1F4CB} Copy prompt for AI", async () => {
       Pasteboard.copy(chatbotPrompt(cfg.aisles));
-      await message("Prompt copied", "Paste it into ChatGPT with a recipe, then use \u201CPaste recipe JSON\u201D.");
+      await message("Prompt copied", "Paste it into any AI chat app with a recipe, then use \u201CPaste recipe JSON\u201D.");
     });
     header(t, "About");
     row(t, `Version ${ctx.version}`, "Updates load automatically from GitHub", null);

@@ -7,7 +7,7 @@
 // iCloud can offload files, so every read downloads first. Writes are
 // last-write-wins; plan changes re-read plan.json right before writing to
 // keep the window for clobbering the other phone's change small.
-import { DEFAULT_AISLES, DEFAULT_MODEL, emptyPlan } from "../core/index.js";
+import { DEFAULT_AISLES, emptyPlan } from "../core/index.js";
 
 export const BOOKMARK = "MealPlanner";
 
@@ -16,7 +16,6 @@ export const DEFAULT_CONFIG = {
   startDay: 1, // 0 = Sunday, 1 = Monday
   aisles: DEFAULT_AISLES,
   pantry: ["salt", "black pepper", "water"],
-  model: DEFAULT_MODEL,
 };
 
 // Settings that differ per phone, kept outside the shared folder.
@@ -185,13 +184,3 @@ export class DeviceSettings {
     return next;
   }
 }
-
-const KEY_NAME = "meal-planner.anthropic-api-key";
-
-export const apiKey = {
-  get: () => (Keychain.contains(KEY_NAME) ? Keychain.get(KEY_NAME) : null),
-  set: (key) => Keychain.set(KEY_NAME, key),
-  remove: () => {
-    if (Keychain.contains(KEY_NAME)) Keychain.remove(KEY_NAME);
-  },
-};

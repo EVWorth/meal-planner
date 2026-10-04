@@ -1,5 +1,4 @@
-// Extract a schema.org Recipe from a web page's JSON-LD, and turn HTML into
-// plain text for the Claude fallback.
+// Extract a schema.org Recipe from a web page's JSON-LD.
 
 const ENTITIES = { amp: "&", lt: "<", gt: ">", quot: '"', apos: "'", nbsp: " ", ndash: "–", mdash: "—", frac12: "½", frac14: "¼", frac34: "¾", deg: "°", hellip: "…", rsquo: "’", lsquo: "‘", rdquo: "”", ldquo: "“" };
 
@@ -118,19 +117,4 @@ export function recipeFromHtml(html, url = "") {
     sourceUrl: url || (typeof node.url === "string" ? node.url : ""),
     notes: "",
   };
-}
-
-/** Readable text of a page, for sending to Claude when there is no JSON-LD. */
-export function htmlToText(html) {
-  return decodeEntities(
-    String(html ?? "")
-      .replace(/<(script|style|noscript|svg|iframe|head)\b[\s\S]*?<\/\1>/gi, " ")
-      .replace(/<!--[\s\S]*?-->/g, " ")
-      .replace(/<(br|\/p|\/div|\/li|\/h\d|\/tr)\b[^>]*>/gi, "\n")
-      .replace(/<[^>]+>/g, " "),
-  )
-    .replace(/[ \t\f\r]+/g, " ")
-    .replace(/\s*\n\s*/g, "\n")
-    .replace(/\n{3,}/g, "\n\n")
-    .trim();
 }

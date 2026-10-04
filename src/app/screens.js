@@ -17,7 +17,6 @@ import {
 import { editRecipe, viewRecipe } from "./editor.js";
 import { addRecipeMenu } from "./importer.js";
 import { addReminders, openReminderTitles, reminderLists } from "./services.js";
-import { apiKey } from "./storage.js";
 import { button, choose, confirm, header, liveTable, message, promptOne, row } from "./ui.js";
 
 const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
@@ -239,16 +238,6 @@ export async function settings(ctx) {
       if (i >= 0) ctx.device.set({ remindersList: lists[i] });
       await refresh();
     });
-    row(t, apiKey.get() ? "Claude API key: set" : "Claude API key: not set", "Used to read recipes from text, photos and pages without recipe data", async () => {
-      const options = apiKey.get() ? ["Replace key", "Remove key"] : ["Add key"];
-      const pick = await choose("Claude API key", options, { message: "Stored in this phone's keychain only. Get one at console.anthropic.com.", destructive: apiKey.get() ? [1] : [] });
-      if (options[pick] === "Remove key") apiKey.remove();
-      else if (pick >= 0) {
-        const key = await promptOne("Claude API key", "", { placeholder: "sk-ant-…" });
-        if (key && key.trim()) apiKey.set(key.trim());
-      }
-      await refresh();
-    });
 
     header(t, "Shared with both phones");
     row(t, DAY_NAMES[cfg.startDay], "Week starts on", async () => {
@@ -274,14 +263,9 @@ export async function settings(ctx) {
       }
       await refresh();
     });
-    row(t, cfg.model, "Claude model", async () => {
-      const v = await promptOne("Claude model", cfg.model);
-      if (v && v.trim()) await ctx.updateConfig({ model: v.trim() });
-      await refresh();
-    });
-    button(t, "📋 Copy chatbot prompt", async () => {
+    button(t, "📋 Copy prompt for AI", async () => {
       Pasteboard.copy(chatbotPrompt(cfg.aisles));
-      await message("Prompt copied", "Paste it into ChatGPT with a recipe, then use “Paste recipe JSON”.");
+      await message("Prompt copied", "Paste it into any AI chat app with a recipe, then use “Paste recipe JSON”.");
     });
     header(t, "About");
     row(t, `Version ${ctx.version}`, "Updates load automatically from GitHub", null);
