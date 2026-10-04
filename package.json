@@ -1,0 +1,15 @@
+{
+  "name": "meal-planner",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Scriptable (iOS) meal planner: recipe library, weekly plans, grocery list to Apple Reminders",
+  "type": "module",
+  "scripts": {
+    "test": "node --test",
+    "build": "node build.mjs",
+    "check": "npm test && npm run build && git diff --exit-code dist/"
+  },
+  "devDependencies": {
+    "esbuild": "^0.28.2"
+  }
+}
