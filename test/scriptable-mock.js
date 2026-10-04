@@ -42,6 +42,7 @@ export function createScriptable({ steps = [], fetch = () => ({ status: 404, bod
     documentsDirectory() { return local; }
     joinPath(a, b) { return path.join(a, b); }
     fileExists(p) { return fs.existsSync(p); }
+    isFileDownloaded(p) { return fs.existsSync(p); }
     createDirectory(p) { fs.mkdirSync(p, { recursive: true }); }
     listContents(p) { return fs.readdirSync(p); }
     readString(p) { return fs.readFileSync(p, "utf8"); }

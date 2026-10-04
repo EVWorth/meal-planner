@@ -54,3 +54,17 @@ test("loader reports a failed first download", async () => {
   assert.equal(s.log.alerts[0].title, "Couldn't download Meal Planner");
   s.cleanup();
 });
+
+test("loader alerts when app.js has no run()", async () => {
+  const s = createScriptable({
+    fetch: (req) => req.url.startsWith("https://api.github.com/")
+      ? { status: 200, body: "abc1234def" }
+      : { status: 200, body: "module.exports = {};" },
+    steps: [{ alert: "OK" }],
+  });
+  const r = await runLoader(s);
+  assert.equal(r.ran, null);
+  assert.equal(s.log.alerts[0].title, "Meal Planner couldn't start");
+  assert.match(s.log.alerts[0].message, /no run\(\)/);
+  s.cleanup();
+});
