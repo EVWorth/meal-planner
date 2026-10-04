@@ -22,7 +22,7 @@ export async function addRecipeMenu(ctx) {
     case 1:
       return pasteJson(ctx);
     case 2:
-      Pasteboard.copy(chatbotPrompt(ctx.config.aisles));
+      Pasteboard.copy(chatbotPrompt());
       return message("Prompt copied", PROMPT_HELP);
     case 3:
       return editRecipe(ctx, { name: "" }, { title: "New recipe" });
@@ -51,7 +51,7 @@ export async function importAndEdit(ctx, url) {
 async function offerPrompt(ctx, why) {
   const pick = await choose("Can't read this recipe", ["Copy prompt for AI", "Type it in"], { message: why });
   if (pick === 0) {
-    Pasteboard.copy(chatbotPrompt(ctx.config.aisles));
+    Pasteboard.copy(chatbotPrompt());
     await message("Prompt copied", PROMPT_HELP);
   } else if (pick === 1) {
     return editRecipe(ctx, { name: "" }, { title: "New recipe" });
@@ -69,7 +69,7 @@ async function pasteJson(ctx) {
   const failed = [];
   for (const item of items) {
     try {
-      const recipe = normalizeRecipe(item, { aisles: ctx.config.aisles, existingIds: ctx.recipes.map((r) => r.id) });
+      const recipe = normalizeRecipe(item, { existingIds: ctx.recipes.map((r) => r.id) });
       ctx.saveRecipe(recipe);
       saved.push(recipe.name);
     } catch (e) {

@@ -16,9 +16,9 @@ test("normalizeRecipe accepts chatbot-style JSON", () => {
     servings: "4",
     tags: "Mexican, Beef, mexican",
     ingredients: [
-      { qty: "1 1/2", unit: "pounds", item: "ground beef", aisle: "Meat & Seafood" },
+      { qty: "1 1/2", unit: "pounds", item: "ground beef" },
       "8 small tortillas",
-      { name: "cheddar", quantity: 1, unit: "cup", aisle: "Not an aisle" },
+      { name: "cheddar", quantity: 1, unit: "cup" },
       { item: "" },
     ],
     instructions: "1. Brown beef.\n2. Fill tortillas.",
@@ -26,10 +26,10 @@ test("normalizeRecipe accepts chatbot-style JSON", () => {
   assert.equal(r.name, "Tacos");
   assert.equal(r.servings, 4);
   assert.deepEqual(r.tags, ["mexican", "beef"]);
-  assert.deepEqual(r.ingredients.map((i) => [i.qty, i.unit, i.item, i.aisle]), [
-    [1.5, "lb", "ground beef", "Meat & Seafood"],
-    [8, "", "small tortillas", "Bakery"],
-    [1, "cup", "cheddar", "Dairy & Eggs"],
+  assert.deepEqual(r.ingredients.map((i) => [i.qty, i.unit, i.item]), [
+    [1.5, "lb", "ground beef"],
+    [8, "", "small tortillas"],
+    [1, "cup", "cheddar"],
   ]);
   assert.deepEqual(r.steps, ["Brown beef.", "Fill tortillas."]);
   assert.equal(r.createdAt, now.toISOString());

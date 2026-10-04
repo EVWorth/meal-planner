@@ -4,7 +4,6 @@ import {
   chatbotPrompt,
   emptyPlan,
   fillPlan,
-  groupByAisle,
   isPastWeek,
   planExport,
   plannedRecipes,
@@ -193,7 +192,7 @@ export async function groceries(ctx) {
   if (!recipes.length) return message("Nothing planned", "Add some recipes to this week first.");
   const listName = ctx.device.get().remindersList;
   const items = planExport(
-    buildGroceryList(recipes, { aisles: ctx.config.aisles }),
+    buildGroceryList(recipes),
     await openReminderTitles(listName),
     { pantry: ctx.config.pantry },
   );
@@ -206,17 +205,14 @@ export async function groceries(ctx) {
     go.onSelect = () => {
       send = true;
     };
-    for (const group of groupByAisle(items)) {
-      header(t, group.aisle);
-      for (const item of group.items) {
-        const on = selected.has(item.key);
-        const why = item.status === "duplicate" ? "Already on the list" : item.status === "pantry" ? "Usually in the pantry" : item.notes;
-        row(t, `${on ? "✅" : "⬜️"} ${item.title}`, why, async () => {
-          if (on) selected.delete(item.key);
-          else selected.add(item.key);
-          await refresh();
-        });
-      }
+    for (const item of items) {
+      const on = selected.has(item.key);
+      const why = item.status === "duplicate" ? "Already on the list" : item.status === "pantry" ? "Usually in the pantry" : item.notes;
+      row(t, `${on ? "✅" : "⬜️"} ${item.title}`, why, async () => {
+        if (on) selected.delete(item.key);
+        else selected.add(item.key);
+        await refresh();
+      });
     }
   });
   if (!send || !selected.size) return;
@@ -255,16 +251,8 @@ export async function settings(ctx) {
       if (v != null) await ctx.updateConfig({ pantry: v.split(",").map((s) => s.trim()).filter(Boolean) });
       await refresh();
     });
-    row(t, cfg.aisles.join(", "), "Aisles, in shopping order", async () => {
-      const v = await promptOne("Aisles", cfg.aisles.join(", "), { message: "Comma separated, in the order you walk the store. Keep “Other” last." });
-      if (v != null) {
-        const aisles = v.split(",").map((s) => s.trim()).filter(Boolean);
-        if (aisles.length) await ctx.updateConfig({ aisles: aisles.includes("Other") ? aisles : [...aisles, "Other"] });
-      }
-      await refresh();
-    });
     button(t, "📋 Copy prompt for AI", async () => {
-      Pasteboard.copy(chatbotPrompt(cfg.aisles));
+      Pasteboard.copy(chatbotPrompt());
       await message("Prompt copied", "Paste it into any AI chat app with a recipe, then use “Paste recipe JSON”.");
     });
     header(t, "About");

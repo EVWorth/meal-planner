@@ -4,7 +4,7 @@ A [Scriptable](https://scriptable.app) app for iPhone. It keeps a shared recipe 
 
 - **Recipes**: import from a web link (share sheet or paste) or from JSON made by any AI chat app, or type one in. Each recipe is one JSON file in a shared iCloud Drive folder.
 - **Week**: 7 nights. Fill them at random from the library, lock the ones you want to keep, mark nights as eating out, and swap single nights. You can set a recipe to *always include* or *never pick*.
-- **Groceries**: ingredients are merged across the week (`1 cup` + `4 tbsp` → `1 1/4 cup`) and grouped by aisle. You review the list before anything is added, one reminder per item. Items already on the list and pantry staples start unticked.
+- **Groceries**: ingredients are merged across the week (`1 cup` + `4 tbsp` → `1 1/4 cup`) and listed alphabetically. You review the list before anything is added, one reminder per item. Items already on the list and pantry staples start unticked.
 
 ## How it fits together
 
@@ -66,7 +66,7 @@ Open the invite. **Meal Planner** then shows up in their iCloud Drive in the Fil
   "servings": 4,
   "tags": ["mexican", "chicken"],
   "ingredients": [
-    { "qty": 1.5, "unit": "lb", "item": "chicken thighs", "aisle": "Meat & Seafood", "note": "boneless" }
+    { "qty": 1.5, "unit": "lb", "item": "chicken thighs", "note": "boneless" }
   ],
   "steps": ["Season the chicken.", "Grill 6 minutes per side."],
   "sourceUrl": "https://…",
@@ -76,7 +76,7 @@ Open the invite. **Meal Planner** then shows up in their iCloud Drive in the Fil
 }
 ```
 
-`plan.json` holds the week (`days[]`, each `recipe`/`out`/`empty`, optionally `locked`) and the `include`/`ignore` recipe lists. `config.json` holds the shared settings: `nights`, `startDay`, `aisles` (in shopping order), and `pantry`. Everything is plain JSON, so it stays readable even if Scriptable stops working.
+`plan.json` holds the week (`days[]`, each `recipe`/`out`/`empty`, optionally `locked`) and the `include`/`ignore` recipe lists. `config.json` holds the shared settings: `nights`, `startDay`, and `pantry`. Everything is plain JSON, so it stays readable even if Scriptable stops working.
 
 ## Development
 

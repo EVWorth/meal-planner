@@ -7,14 +7,13 @@
 // iCloud can offload files, so every read downloads first. Writes are
 // last-write-wins; plan changes re-read plan.json right before writing to
 // keep the window for clobbering the other phone's change small.
-import { DEFAULT_AISLES, emptyPlan } from "../core/index.js";
+import { emptyPlan } from "../core/index.js";
 
 export const BOOKMARK = "MealPlanner";
 
 export const DEFAULT_CONFIG = {
   nights: 7,
   startDay: 1, // 0 = Sunday, 1 = Monday
-  aisles: DEFAULT_AISLES,
   pantry: ["salt", "black pepper", "water"],
 };
 

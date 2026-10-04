@@ -10,17 +10,17 @@ const fixtureHtml = readFileSync(new URL("./fixtures/allrecipes-like.html", impo
 const tacos = {
   id: "tacos", name: "Tacos", servings: 4, tags: ["mexican"], steps: ["Cook."], sourceUrl: "", notes: "",
   ingredients: [
-    { qty: 1, unit: "lb", item: "ground beef", aisle: "Meat & Seafood", note: "" },
-    { qty: 1, unit: "", item: "onion", aisle: "Produce", note: "" },
-    { qty: null, unit: "", item: "salt", aisle: "Spices", note: "" },
+    { qty: 1, unit: "lb", item: "ground beef", note: "" },
+    { qty: 1, unit: "", item: "onion", note: "" },
+    { qty: null, unit: "", item: "salt", note: "" },
   ],
 };
 const chili = {
   id: "chili", name: "Chili", servings: 6, tags: [], steps: [], sourceUrl: "", notes: "",
   ingredients: [
-    { qty: 8, unit: "oz", item: "ground beef", aisle: "Meat & Seafood", note: "" },
-    { qty: 2, unit: "", item: "onions", aisle: "Produce", note: "" },
-    { qty: 2, unit: "can", item: "kidney beans", aisle: "Canned & Jarred", note: "" },
+    { qty: 8, unit: "oz", item: "ground beef", note: "" },
+    { qty: 2, unit: "", item: "onions", note: "" },
+    { qty: 2, unit: "can", item: "kidney beans", note: "" },
   ],
 };
 
@@ -47,7 +47,7 @@ test("paste chatbot JSON, review, save", async () => {
   noErrors(s);
   const saved = s.readShared("recipes/lemon-pasta.json");
   assert.equal(saved.name, "Lemon Pasta");
-  assert.equal(saved.ingredients[1].aisle, "Produce");
+  assert.deepEqual(saved.ingredients[1], { qty: 1, unit: "", item: "lemon", note: "zested" });
   s.cleanup();
 });
 

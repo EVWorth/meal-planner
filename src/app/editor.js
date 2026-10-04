@@ -1,7 +1,6 @@
 // Viewing and editing a single recipe.
 import {
   formatAmount,
-  guessAisle,
   ingredientText,
   normalizeIngredient,
   normalizeRecipe,
@@ -10,14 +9,14 @@ import {
 import { button, choose, escapeHtml, header, liveTable, promptOne, row, showError } from "./ui.js";
 
 /** Loosely-shaped recipe input -> editable draft. Never throws. */
-export function toDraft(input, aisles) {
+export function toDraft(input) {
   return {
     id: input.id,
     createdAt: input.createdAt,
     name: String(input.name ?? input.title ?? ""),
     servings: input.servings ?? null,
     tags: Array.isArray(input.tags) ? input.tags : String(input.tags ?? "").split(",").map((t) => t.trim()).filter(Boolean),
-    ingredients: (Array.isArray(input.ingredients) ? input.ingredients : []).map((i) => normalizeIngredient(i, aisles)).filter(Boolean),
+    ingredients: (Array.isArray(input.ingredients) ? input.ingredients : []).map(normalizeIngredient).filter(Boolean),
     steps: (Array.isArray(input.steps) ? input.steps : []).map(String),
     sourceUrl: String(input.sourceUrl ?? ""),
     notes: String(input.notes ?? ""),
@@ -35,8 +34,7 @@ function move(list, i, delta) {
  * `existing` is the stored recipe when editing (keeps id and createdAt).
  */
 export async function editRecipe(ctx, input, { existing = null, title = "Edit recipe" } = {}) {
-  const aisles = ctx.config.aisles;
-  const draft = toDraft(input, aisles);
+  const draft = toDraft(input);
   for (;;) {
     let save = false;
     await liveTable(async (t, refresh) => {
@@ -76,21 +74,14 @@ export async function editRecipe(ctx, input, { existing = null, title = "Edit re
 
       header(t, `Ingredients (${draft.ingredients.length})`);
       draft.ingredients.forEach((ing, i) => {
-        row(t, ingredientText(ing), ing.aisle, async () => {
-          const pick = await choose(ingredientText(ing), ["Edit", `Aisle: ${ing.aisle}`, "Move up", "Delete"], { destructive: [3] });
+        row(t, ingredientText(ing), "", async () => {
+          const pick = await choose(ingredientText(ing), ["Edit", "Move up", "Delete"], { destructive: [2] });
           if (pick === 0) {
             const v = await promptOne("Ingredient", ingredientText(ing), { message: 'Like "1 1/2 cup flour, sifted"' });
-            if (v != null && v.trim()) {
-              const parsed = parseIngredientLine(v);
-              const aisle = parsed.item.toLowerCase() === ing.item.toLowerCase() ? ing.aisle : guessAisle(parsed.item, aisles);
-              draft.ingredients[i] = { ...parsed, aisle };
-            }
+            if (v != null && v.trim()) draft.ingredients[i] = parseIngredientLine(v);
           } else if (pick === 1) {
-            const a = await choose("Aisle", aisles);
-            if (a >= 0) ing.aisle = aisles[a];
-          } else if (pick === 2) {
             move(draft.ingredients, i, -1);
-          } else if (pick === 3) {
+          } else if (pick === 2) {
             draft.ingredients.splice(i, 1);
           }
           await refresh();
@@ -98,12 +89,12 @@ export async function editRecipe(ctx, input, { existing = null, title = "Edit re
       });
       button(t, "＋ Add ingredient", async () => {
         const v = await promptOne("Add ingredient", "", { message: 'Like "2 cloves garlic, minced"', ok: "Add" });
-        if (v && v.trim()) draft.ingredients.push(normalizeIngredient(v, aisles));
+        if (v && v.trim()) draft.ingredients.push(normalizeIngredient(v));
         await refresh();
       });
       button(t, "📋 Add ingredients from clipboard (one per line)", async () => {
         const lines = String(Pasteboard.paste() ?? "").split(/\n+/).map((l) => l.trim()).filter(Boolean);
-        draft.ingredients.push(...lines.map((l) => normalizeIngredient(l, aisles)).filter(Boolean));
+        draft.ingredients.push(...lines.map(normalizeIngredient).filter(Boolean));
         await refresh();
       });
 
@@ -136,7 +127,6 @@ export async function editRecipe(ctx, input, { existing = null, title = "Edit re
     if (!save) return null;
     try {
       const recipe = normalizeRecipe(draft, {
-        aisles,
         existing,
         existingIds: ctx.recipes.map((r) => r.id),
       });

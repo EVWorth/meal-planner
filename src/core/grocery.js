@@ -1,15 +1,14 @@
-// Build a merged, aisle-grouped grocery list from planned recipes, and
+// Build a merged grocery list from planned recipes, and
 // match it against what's already in Reminders.
 import { itemKey } from "./ingredients.js";
-import { DEFAULT_AISLES } from "./aisles.js";
 import { formatAmount, sumAmounts } from "./units.js";
 
 /**
  * @param recipes  recipes in the plan (a recipe planned twice appears twice)
- * @returns [{ key, name, aisle, amounts:[{qty,unit}], recipes:[name], title, notes }]
- *          sorted by aisle order, then name.
+ * @returns [{ key, name, amounts:[{qty,unit}], recipes:[name], title, notes }]
+ *          sorted by name.
  */
-export function buildGroceryList(recipes, { aisles = DEFAULT_AISLES } = {}) {
+export function buildGroceryList(recipes) {
   const byKey = new Map();
   for (const recipe of recipes) {
     for (const ing of recipe.ingredients ?? []) {
@@ -17,23 +16,19 @@ export function buildGroceryList(recipes, { aisles = DEFAULT_AISLES } = {}) {
       if (!key) continue;
       let entry = byKey.get(key);
       if (!entry) {
-        entry = { key, name: capitalize(ing.item.trim()), aisle: ing.aisle || "Other", raw: [], recipes: [] };
+        entry = { key, name: capitalize(ing.item.trim()), raw: [], recipes: [] };
         byKey.set(key, entry);
       }
       entry.raw.push({ qty: ing.qty, unit: ing.unit || "" });
       if (!entry.recipes.includes(recipe.name)) entry.recipes.push(recipe.name);
     }
   }
-  const order = (a) => {
-    const i = aisles.indexOf(a);
-    return i < 0 ? aisles.length : i;
-  };
   return [...byKey.values()]
     .map(({ raw, ...e }) => {
       const amounts = sumAmounts(raw);
       return { ...e, amounts, title: groceryTitle(e.name, amounts), notes: e.recipes.join(", ") };
     })
-    .sort((a, b) => order(a.aisle) - order(b.aisle) || a.name.localeCompare(b.name));
+    .sort((a, b) => a.name.localeCompare(b.name));
 }
 
 function capitalize(s) {
@@ -65,15 +60,4 @@ export function planExport(items, existingTitles, { pantry = [] } = {}) {
     ...item,
     status: existing.has(item.key) ? "duplicate" : pantryKeys.has(item.key) ? "pantry" : "add",
   }));
-}
-
-/** Group items by aisle, preserving order: [{ aisle, items }]. */
-export function groupByAisle(items) {
-  const groups = [];
-  for (const item of items) {
-    const last = groups[groups.length - 1];
-    if (last && last.aisle === item.aisle) last.items.push(item);
-    else groups.push({ aisle: item.aisle, items: [item] });
-  }
-  return groups;
 }

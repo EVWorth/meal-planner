@@ -3,12 +3,11 @@
 // Stored recipe (recipes/<id>.json):
 // {
 //   id, name, servings (number|null), tags: [string],
-//   ingredients: [{ qty (number|null), unit, item, aisle, note }],
+//   ingredients: [{ qty (number|null), unit, item, note }],
 //   steps: [string], sourceUrl, notes, createdAt, updatedAt
 // }
 import { parseIngredientLine, parseNumber } from "./ingredients.js";
 import { canonicalUnit, formatQty } from "./units.js";
-import { DEFAULT_AISLES, guessAisle } from "./aisles.js";
 
 export function slugify(name) {
   const s = String(name ?? "")
@@ -42,7 +41,7 @@ function toQty(v) {
   return n != null && n > 0 ? n : null;
 }
 
-export function normalizeIngredient(input, aisles = DEFAULT_AISLES) {
+export function normalizeIngredient(input) {
   let ing;
   if (typeof input === "string") {
     ing = parseIngredientLine(input);
@@ -52,17 +51,15 @@ export function normalizeIngredient(input, aisles = DEFAULT_AISLES) {
       unit: toText(input.unit),
       item: toText(input.item ?? input.name ?? input.ingredient),
       note: toText(input.note ?? input.notes ?? input.preparation),
-      aisle: toText(input.aisle),
     };
     // An object with only a text field ("1 cup flour") — parse it.
-    if (!ing.item && typeof input.text === "string") ing = { ...parseIngredientLine(input.text), aisle: ing.aisle };
+    if (!ing.item && typeof input.text === "string") ing = parseIngredientLine(input.text);
   } else {
     return null;
   }
   if (!ing.item) return null;
   const unit = ing.unit ? canonicalUnit(ing.unit) ?? ing.unit.toLowerCase() : "";
-  const aisle = aisles.includes(ing.aisle) ? ing.aisle : guessAisle(ing.item, aisles);
-  return { qty: ing.qty ?? null, unit, item: ing.item, aisle, note: ing.note ?? "" };
+  return { qty: ing.qty ?? null, unit, item: ing.item, note: ing.note ?? "" };
 }
 
 function toList(v) {
@@ -77,12 +74,12 @@ function toList(v) {
  * into a stored recipe. Throws if there is no name or no ingredients.
  * `existing` keeps id/createdAt when editing.
  */
-export function normalizeRecipe(input, { aisles = DEFAULT_AISLES, now = new Date(), existing = null, existingIds = [] } = {}) {
+export function normalizeRecipe(input, { now = new Date(), existing = null, existingIds = [] } = {}) {
   if (!input || typeof input !== "object") throw new Error("Recipe must be a JSON object.");
   const name = toText(input.name ?? input.title);
   if (!name) throw new Error("Recipe needs a name.");
   const ingredients = toList(input.ingredients)
-    .map((i) => normalizeIngredient(i, aisles))
+    .map(normalizeIngredient)
     .filter(Boolean);
   if (!ingredients.length) throw new Error(`"${name}" has no ingredients.`);
   const steps = toList(input.steps ?? input.instructions)

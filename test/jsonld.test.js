@@ -18,9 +18,9 @@ test("recipeFromHtml finds a Recipe inside @graph with a type array", () => {
 test("JSON-LD result normalizes into a stored recipe", () => {
   const r = normalizeRecipe(recipeFromHtml(html), { now: new Date("2026-10-04T00:00:00Z") });
   assert.equal(r.id, "easy-chicken-and-rice");
-  assert.deepEqual(r.ingredients[0], { qty: 1.5, unit: "lb", item: "chicken thighs", aisle: "Meat & Seafood", note: "" });
-  assert.equal(r.ingredients[2].aisle, "Canned & Jarred");
-  assert.deepEqual(r.ingredients[4], { qty: null, unit: "", item: "Salt to taste", aisle: "Spices", note: "" });
+  assert.deepEqual(r.ingredients[0], { qty: 1.5, unit: "lb", item: "chicken thighs", note: "" });
+  assert.deepEqual(r.ingredients[2], { qty: 2, unit: "cup", item: "chicken broth", note: "" });
+  assert.deepEqual(r.ingredients[4], { qty: null, unit: "", item: "Salt to taste", note: "" });
 });
 
 test("recipeFromHtml returns null without a Recipe", () => {

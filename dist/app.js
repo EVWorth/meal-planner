@@ -324,48 +324,6 @@ function singular(word) {
   return word;
 }
 
-// src/core/aisles.js
-var DEFAULT_AISLES = [
-  "Produce",
-  "Meat & Seafood",
-  "Dairy & Eggs",
-  "Bakery",
-  "Pantry",
-  "Spices",
-  "Canned & Jarred",
-  "Frozen",
-  "Beverages",
-  "Household",
-  "Other"
-];
-var RULES = [
-  ["Pantry", ["peanut butter", "almond butter", "cream of tartar", "cream of mushroom", "fish sauce", "soy sauce", "oyster sauce"]],
-  ["Produce", ["green bean"]],
-  ["Canned & Jarred", ["tomato paste", "tomato sauce", "diced tomato", "crushed tomato", "canned", "coconut milk", "broth", "stock", "salsa", "pesto", "olives", "pickle", "capers", "chickpea", "black bean", "kidney bean", "pinto bean", "beans"]],
-  ["Frozen", ["frozen", "ice cream"]],
-  ["Spices", ["salt", "pepper flakes", "black pepper", "peppercorn", "cumin", "paprika", "oregano", "thyme", "rosemary", "cinnamon", "nutmeg", "chili powder", "chilli powder", "curry powder", "garam masala", "turmeric", "bay leaf", "cayenne", "garlic powder", "onion powder", "seasoning", "vanilla", "dried", "ground ginger", "ground coriander", "ground cloves", "allspice"]],
-  ["Meat & Seafood", ["chicken", "beef", "pork", "bacon", "sausage", "turkey", "lamb", "ham", "steak", "salmon", "shrimp", "prawn", "tuna", "cod", "fish", "chorizo", "prosciutto"]],
-  ["Dairy & Eggs", ["milk", "butter", "cheese", "parmesan", "mozzarella", "cheddar", "feta", "cream", "yogurt", "yoghurt", "egg", "sour cream", "creme fraiche"]],
-  ["Bakery", ["bread", "bun", "baguette", "tortilla", "pita", "naan", "roll", "bagel"]],
-  ["Produce", ["onion", "garlic", "shallot", "scallion", "green onion", "tomato", "potato", "carrot", "celery", "lettuce", "spinach", "kale", "cabbage", "broccoli", "cauliflower", "zucchini", "squash", "cucumber", "bell pepper", "jalapeno", "jalape\xF1o", "chili", "chile", "mushroom", "avocado", "lemon", "lime", "orange", "apple", "banana", "berry", "berries", "ginger", "cilantro", "parsley", "basil", "mint", "dill", "chive", "herb", "corn", "pea", "green bean", "asparagus", "eggplant", "leek", "radish", "arugula", "sweet potato", "fruit", "vegetable"]],
-  ["Beverages", ["wine", "beer", "juice", "soda", "coffee", "tea"]],
-  ["Pantry", ["flour", "sugar", "oil", "vinegar", "rice", "pasta", "noodle", "spaghetti", "oat", "honey", "maple", "soy sauce", "fish sauce", "sauce", "mustard", "ketchup", "mayo", "mayonnaise", "baking", "yeast", "cornstarch", "breadcrumb", "panko", "lentil", "quinoa", "nut", "almond", "peanut", "sesame", "syrup", "chocolate", "cocoa", "cracker", "cereal", "water"]],
-  ["Household", ["foil", "parchment", "paper towel", "plastic wrap", "zip"]]
-];
-var COMPILED = RULES.map(([aisle, words]) => [
-  aisle,
-  words.map((w) => new RegExp(`(^|[^\\p{L}])${w}(s|es)?($|[^\\p{L}])`, "u"))
-]);
-function guessAisle(item, aisles = DEFAULT_AISLES) {
-  const name = String(item ?? "").toLowerCase();
-  const key = itemKey(item);
-  for (const [aisle, patterns] of COMPILED) {
-    if (!aisles.includes(aisle)) continue;
-    if (patterns.some((re) => re.test(name) || re.test(key))) return aisle;
-  }
-  return aisles.includes("Other") ? "Other" : aisles[aisles.length - 1];
-}
-
 // src/core/recipe.js
 function slugify(name) {
   const s = String(name ?? "").normalize("NFKD").replace(/[̀-ͯ]/g, "").toLowerCase().replace(/&/g, " and ").replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 60).replace(/-+$/g, "");
@@ -386,7 +344,7 @@ function toQty(v) {
   const n = parseNumber(v);
   return n != null && n > 0 ? n : null;
 }
-function normalizeIngredient(input, aisles = DEFAULT_AISLES) {
+function normalizeIngredient(input) {
   let ing;
   if (typeof input === "string") {
     ing = parseIngredientLine(input);
@@ -395,17 +353,15 @@ function normalizeIngredient(input, aisles = DEFAULT_AISLES) {
       qty: toQty(input.qty ?? input.quantity ?? input.amount),
       unit: toText(input.unit),
       item: toText(input.item ?? input.name ?? input.ingredient),
-      note: toText(input.note ?? input.notes ?? input.preparation),
-      aisle: toText(input.aisle)
+      note: toText(input.note ?? input.notes ?? input.preparation)
     };
-    if (!ing.item && typeof input.text === "string") ing = { ...parseIngredientLine(input.text), aisle: ing.aisle };
+    if (!ing.item && typeof input.text === "string") ing = parseIngredientLine(input.text);
   } else {
     return null;
   }
   if (!ing.item) return null;
   const unit = ing.unit ? canonicalUnit(ing.unit) ?? ing.unit.toLowerCase() : "";
-  const aisle = aisles.includes(ing.aisle) ? ing.aisle : guessAisle(ing.item, aisles);
-  return { qty: ing.qty ?? null, unit, item: ing.item, aisle, note: ing.note ?? "" };
+  return { qty: ing.qty ?? null, unit, item: ing.item, note: ing.note ?? "" };
 }
 function toList(v) {
   if (v == null) return [];
@@ -413,11 +369,11 @@ function toList(v) {
   if (typeof v === "string") return v.split(/\n+/);
   return [v];
 }
-function normalizeRecipe(input, { aisles = DEFAULT_AISLES, now = /* @__PURE__ */ new Date(), existing = null, existingIds = [] } = {}) {
+function normalizeRecipe(input, { now = /* @__PURE__ */ new Date(), existing = null, existingIds = [] } = {}) {
   if (!input || typeof input !== "object") throw new Error("Recipe must be a JSON object.");
   const name = toText(input.name ?? input.title);
   if (!name) throw new Error("Recipe needs a name.");
-  const ingredients = toList(input.ingredients).map((i) => normalizeIngredient(i, aisles)).filter(Boolean);
+  const ingredients = toList(input.ingredients).map(normalizeIngredient).filter(Boolean);
   if (!ingredients.length) throw new Error(`"${name}" has no ingredients.`);
   const steps = toList(input.steps ?? input.instructions).map((s) => typeof s === "object" && s ? toText(s.text) : toText(s)).map((s) => s.replace(/^\d+[.)]\s*/, "")).filter(Boolean);
   const tags2 = [...new Set(toList(typeof input.tags === "string" ? input.tags.split(",") : input.tags).map((t) => toText(t).toLowerCase()).filter(Boolean))];
@@ -566,7 +522,7 @@ function recipeFromHtml(html, url = "") {
 }
 
 // src/core/grocery.js
-function buildGroceryList(recipes, { aisles = DEFAULT_AISLES } = {}) {
+function buildGroceryList(recipes) {
   const byKey = /* @__PURE__ */ new Map();
   for (const recipe of recipes) {
     for (const ing of recipe.ingredients ?? []) {
@@ -574,21 +530,17 @@ function buildGroceryList(recipes, { aisles = DEFAULT_AISLES } = {}) {
       if (!key) continue;
       let entry = byKey.get(key);
       if (!entry) {
-        entry = { key, name: capitalize(ing.item.trim()), aisle: ing.aisle || "Other", raw: [], recipes: [] };
+        entry = { key, name: capitalize(ing.item.trim()), raw: [], recipes: [] };
         byKey.set(key, entry);
       }
       entry.raw.push({ qty: ing.qty, unit: ing.unit || "" });
       if (!entry.recipes.includes(recipe.name)) entry.recipes.push(recipe.name);
     }
   }
-  const order = (a) => {
-    const i = aisles.indexOf(a);
-    return i < 0 ? aisles.length : i;
-  };
   return [...byKey.values()].map(({ raw, ...e }) => {
     const amounts = sumAmounts(raw);
     return { ...e, amounts, title: groceryTitle(e.name, amounts), notes: e.recipes.join(", ") };
-  }).sort((a, b) => order(a.aisle) - order(b.aisle) || a.name.localeCompare(b.name));
+  }).sort((a, b) => a.name.localeCompare(b.name));
 }
 function capitalize(s) {
   return s ? s[0].toUpperCase() + s.slice(1) : s;
@@ -607,15 +559,6 @@ function planExport(items, existingTitles, { pantry = [] } = {}) {
     ...item,
     status: existing.has(item.key) ? "duplicate" : pantryKeys.has(item.key) ? "pantry" : "add"
   }));
-}
-function groupByAisle(items) {
-  const groups = [];
-  for (const item of items) {
-    const last = groups[groups.length - 1];
-    if (last && last.aisle === item.aisle) last.items.push(item);
-    else groups.push({ aisle: item.aisle, items: [item] });
-  }
-  return groups;
 }
 
 // src/core/plan.js
@@ -716,7 +659,7 @@ function isPastWeek(plan, today = /* @__PURE__ */ new Date()) {
 }
 
 // src/core/chatbot.js
-function chatbotPrompt(aisles = DEFAULT_AISLES) {
+function chatbotPrompt() {
   return `Convert the recipe below into JSON for my meal planner. Reply with only the JSON, in a code block, shaped like this:
 
 {
@@ -724,15 +667,15 @@ function chatbotPrompt(aisles = DEFAULT_AISLES) {
   "servings": 4,
   "tags": ["mexican", "chicken"],
   "ingredients": [
-    { "qty": 1.5, "unit": "lb", "item": "chicken thighs", "note": "boneless", "aisle": "Meat & Seafood" },
-    { "qty": null, "unit": "", "item": "salt", "note": "to taste", "aisle": "Spices" }
+    { "qty": 1.5, "unit": "lb", "item": "chicken thighs", "note": "boneless" },
+    { "qty": null, "unit": "", "item": "salt", "note": "to taste" }
   ],
   "steps": ["Season the chicken.", "Grill 6 minutes per side."],
   "sourceUrl": "",
   "notes": ""
 }
 
-Rules: qty is a number or null. unit is tsp, tbsp, cup, fl oz, ml, l, g, kg, oz, lb, a count word (clove, can, bunch), or "". item is what you buy, without preparation; put preparation in note. aisle is one of: ${aisles.join(", ")}.
+Rules: qty is a number or null. unit is tsp, tbsp, cup, fl oz, ml, l, g, kg, oz, lb, a count word (clove, can, bunch), or "". item is what you buy, without preparation; put preparation in note.
 
 Recipe:
 `;
@@ -744,7 +687,6 @@ var DEFAULT_CONFIG = {
   nights: 7,
   startDay: 1,
   // 0 = Sunday, 1 = Monday
-  aisles: DEFAULT_AISLES,
   pantry: ["salt", "black pepper", "water"]
 };
 var DEFAULT_DEVICE = {
@@ -1028,14 +970,14 @@ function escapeHtml(s) {
 }
 
 // src/app/editor.js
-function toDraft(input, aisles) {
+function toDraft(input) {
   return {
     id: input.id,
     createdAt: input.createdAt,
     name: String(input.name ?? input.title ?? ""),
     servings: input.servings ?? null,
     tags: Array.isArray(input.tags) ? input.tags : String(input.tags ?? "").split(",").map((t) => t.trim()).filter(Boolean),
-    ingredients: (Array.isArray(input.ingredients) ? input.ingredients : []).map((i) => normalizeIngredient(i, aisles)).filter(Boolean),
+    ingredients: (Array.isArray(input.ingredients) ? input.ingredients : []).map(normalizeIngredient).filter(Boolean),
     steps: (Array.isArray(input.steps) ? input.steps : []).map(String),
     sourceUrl: String(input.sourceUrl ?? ""),
     notes: String(input.notes ?? "")
@@ -1047,8 +989,7 @@ function move(list, i, delta) {
   [list[i], list[j]] = [list[j], list[i]];
 }
 async function editRecipe(ctx, input, { existing = null, title = "Edit recipe" } = {}) {
-  const aisles = ctx.config.aisles;
-  const draft = toDraft(input, aisles);
+  const draft = toDraft(input);
   for (; ; ) {
     let save = false;
     await liveTable(async (t, refresh) => {
@@ -1087,21 +1028,14 @@ async function editRecipe(ctx, input, { existing = null, title = "Edit recipe" }
       });
       header(t, `Ingredients (${draft.ingredients.length})`);
       draft.ingredients.forEach((ing, i) => {
-        row(t, ingredientText(ing), ing.aisle, async () => {
-          const pick = await choose(ingredientText(ing), ["Edit", `Aisle: ${ing.aisle}`, "Move up", "Delete"], { destructive: [3] });
+        row(t, ingredientText(ing), "", async () => {
+          const pick = await choose(ingredientText(ing), ["Edit", "Move up", "Delete"], { destructive: [2] });
           if (pick === 0) {
             const v = await promptOne("Ingredient", ingredientText(ing), { message: 'Like "1 1/2 cup flour, sifted"' });
-            if (v != null && v.trim()) {
-              const parsed = parseIngredientLine(v);
-              const aisle = parsed.item.toLowerCase() === ing.item.toLowerCase() ? ing.aisle : guessAisle(parsed.item, aisles);
-              draft.ingredients[i] = { ...parsed, aisle };
-            }
+            if (v != null && v.trim()) draft.ingredients[i] = parseIngredientLine(v);
           } else if (pick === 1) {
-            const a = await choose("Aisle", aisles);
-            if (a >= 0) ing.aisle = aisles[a];
-          } else if (pick === 2) {
             move(draft.ingredients, i, -1);
-          } else if (pick === 3) {
+          } else if (pick === 2) {
             draft.ingredients.splice(i, 1);
           }
           await refresh();
@@ -1109,12 +1043,12 @@ async function editRecipe(ctx, input, { existing = null, title = "Edit recipe" }
       });
       button(t, "\uFF0B Add ingredient", async () => {
         const v = await promptOne("Add ingredient", "", { message: 'Like "2 cloves garlic, minced"', ok: "Add" });
-        if (v && v.trim()) draft.ingredients.push(normalizeIngredient(v, aisles));
+        if (v && v.trim()) draft.ingredients.push(normalizeIngredient(v));
         await refresh();
       });
       button(t, "\u{1F4CB} Add ingredients from clipboard (one per line)", async () => {
         const lines = String(Pasteboard.paste() ?? "").split(/\n+/).map((l) => l.trim()).filter(Boolean);
-        draft.ingredients.push(...lines.map((l) => normalizeIngredient(l, aisles)).filter(Boolean));
+        draft.ingredients.push(...lines.map(normalizeIngredient).filter(Boolean));
         await refresh();
       });
       header(t, `Steps (${draft.steps.length})`);
@@ -1146,7 +1080,6 @@ async function editRecipe(ctx, input, { existing = null, title = "Edit recipe" }
     if (!save) return null;
     try {
       const recipe = normalizeRecipe(draft, {
-        aisles,
         existing,
         existingIds: ctx.recipes.map((r) => r.id)
       });
@@ -1270,7 +1203,7 @@ async function addRecipeMenu(ctx) {
     case 1:
       return pasteJson(ctx);
     case 2:
-      Pasteboard.copy(chatbotPrompt(ctx.config.aisles));
+      Pasteboard.copy(chatbotPrompt());
       return message("Prompt copied", PROMPT_HELP);
     case 3:
       return editRecipe(ctx, { name: "" }, { title: "New recipe" });
@@ -1293,7 +1226,7 @@ async function importAndEdit(ctx, url) {
 async function offerPrompt(ctx, why) {
   const pick = await choose("Can't read this recipe", ["Copy prompt for AI", "Type it in"], { message: why });
   if (pick === 0) {
-    Pasteboard.copy(chatbotPrompt(ctx.config.aisles));
+    Pasteboard.copy(chatbotPrompt());
     await message("Prompt copied", PROMPT_HELP);
   } else if (pick === 1) {
     return editRecipe(ctx, { name: "" }, { title: "New recipe" });
@@ -1309,7 +1242,7 @@ async function pasteJson(ctx) {
   const failed = [];
   for (const item of items) {
     try {
-      const recipe = normalizeRecipe(item, { aisles: ctx.config.aisles, existingIds: ctx.recipes.map((r) => r.id) });
+      const recipe = normalizeRecipe(item, { existingIds: ctx.recipes.map((r) => r.id) });
       ctx.saveRecipe(recipe);
       saved.push(recipe.name);
     } catch (e) {
@@ -1494,7 +1427,7 @@ async function groceries(ctx) {
   if (!recipes.length) return message("Nothing planned", "Add some recipes to this week first.");
   const listName = ctx.device.get().remindersList;
   const items = planExport(
-    buildGroceryList(recipes, { aisles: ctx.config.aisles }),
+    buildGroceryList(recipes),
     await openReminderTitles(listName),
     { pantry: ctx.config.pantry }
   );
@@ -1507,17 +1440,14 @@ async function groceries(ctx) {
     go.onSelect = () => {
       send = true;
     };
-    for (const group of groupByAisle(items)) {
-      header(t, group.aisle);
-      for (const item of group.items) {
-        const on = selected.has(item.key);
-        const why = item.status === "duplicate" ? "Already on the list" : item.status === "pantry" ? "Usually in the pantry" : item.notes;
-        row(t, `${on ? "\u2705" : "\u2B1C\uFE0F"} ${item.title}`, why, async () => {
-          if (on) selected.delete(item.key);
-          else selected.add(item.key);
-          await refresh();
-        });
-      }
+    for (const item of items) {
+      const on = selected.has(item.key);
+      const why = item.status === "duplicate" ? "Already on the list" : item.status === "pantry" ? "Usually in the pantry" : item.notes;
+      row(t, `${on ? "\u2705" : "\u2B1C\uFE0F"} ${item.title}`, why, async () => {
+        if (on) selected.delete(item.key);
+        else selected.add(item.key);
+        await refresh();
+      });
     }
   });
   if (!send || !selected.size) return;
@@ -1552,16 +1482,8 @@ async function settings(ctx) {
       if (v != null) await ctx.updateConfig({ pantry: v.split(",").map((s) => s.trim()).filter(Boolean) });
       await refresh();
     });
-    row(t, cfg.aisles.join(", "), "Aisles, in shopping order", async () => {
-      const v = await promptOne("Aisles", cfg.aisles.join(", "), { message: "Comma separated, in the order you walk the store. Keep \u201COther\u201D last." });
-      if (v != null) {
-        const aisles = v.split(",").map((s) => s.trim()).filter(Boolean);
-        if (aisles.length) await ctx.updateConfig({ aisles: aisles.includes("Other") ? aisles : [...aisles, "Other"] });
-      }
-      await refresh();
-    });
     button(t, "\u{1F4CB} Copy prompt for AI", async () => {
-      Pasteboard.copy(chatbotPrompt(cfg.aisles));
+      Pasteboard.copy(chatbotPrompt());
       await message("Prompt copied", "Paste it into any AI chat app with a recipe, then use \u201CPaste recipe JSON\u201D.");
     });
     header(t, "About");
